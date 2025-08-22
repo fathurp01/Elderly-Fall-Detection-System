@@ -1,0 +1,73 @@
+# Laptop Server Requirements - Python 3.12
+# Fall Detection System Requirements
+# Production-ready dependencies with pinned versions
+
+# Web Framework - Updated untuk Python 3.12
+Flask==3.0.3
+Flask-SocketIO==5.4.1
+python-socketio==5.11.4
+python-engineio==4.10.1
+Werkzeug==3.0.4
+
+# Data Processing - Updated untuk Python 3.12
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.14.1
+
+# Machine Learning - Updated untuk Python 3.12
+tensorflow==2.19.0
+scikit-learn==1.6.1
+joblib==1.5.1
+
+# Firebase Integration - Updated untuk Python 3.12
+firebase-admin==7.1.0
+google-cloud-firestore>=2.21.0
+
+# Computer Vision - Updated untuk Python 3.12
+opencv-python==4.11.0.86
+Pillow==11.0.0
+
+# Object Detection and Tracking - Updated untuk Python 3.12
+ultralytics==8.3.184
+norfair==2.3.0
+albumentations==2.0.8
+torch>=2.5.0
+torchvision>=0.20.0
+
+# Data Visualization - Updated untuk Python 3.12
+matplotlib==3.10.0
+seaborn==0.13.2
+
+# Utilities - Updated untuk Python 3.12
+tqdm==4.67.1
+lap==0.5.12
+
+# System - Updated untuk Python 3.12
+psutil==6.1.0
+requests==2.32.3
+click==8.1.8
+json5==0.9.14
+
+# Logging and Monitoring
+coloredlogs==15.0.1
+
+# Development and Testing (optional)
+# pytest==8.3.3
+# pytest-cov==6.0.0
+# black==24.10.0
+# flake8==7.1.1
+
+# Caching and Rate Limiting
+Flask-Limiter>=3.5.0
+Flask-Caching>=2.1.0
+redis>=5.0.0
+
+# Optional: Advanced Notifications
+# python-telegram-bot==21.7
+# twilio==9.3.6
+
+# Security
+cryptography>=43.0.3
+
+# Environment Management
+python-dotenv==1.0.1

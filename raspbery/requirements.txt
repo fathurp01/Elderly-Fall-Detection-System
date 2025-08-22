@@ -1,0 +1,41 @@
+# Fall Detection System - Raspberry Pi Client Requirements
+# Compatible with Python 3.11 and ARM architecture
+
+# Computer Vision and Image Processing
+opencv-python==4.8.1.78
+numpy==1.24.3
+
+# YOLOv8 and Deep Learning
+ultralytics==8.0.196
+torch==1.13.1
+torchvision==0.14.1
+
+# WebSocket Communication
+python-socketio[client]==5.8.0
+requests==2.31.0
+
+# System and Utilities
+Pillow==10.0.0
+psutil==5.9.5
+
+# Logging and Configuration
+pyyaml==6.0.1
+
+# Optional: For PiCamera support (uncomment if using PiCamera)
+picamera2==0.3.12
+# libcamera harus install via apt, bukan pip
+
+# Development and Testing
+pytest==7.4.0
+pytest-cov==4.1.0
+
+# Note: These versions are tested and compatible with:
+# - Python 3.11
+# - Raspberry Pi 4 (ARM64)
+# - Raspberry Pi OS Bullseye/Bookworm
+#
+# Installation command:
+# pip install -r requirements.txt
+#
+# For faster installation on Raspberry Pi:
+# pip install -r requirements.txt --extra-index-url https://www.piwheels.org/simple
