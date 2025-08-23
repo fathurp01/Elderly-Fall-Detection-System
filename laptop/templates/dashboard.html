@@ -610,6 +610,8 @@
              grid-row-start: 5;
          }
          
+
+         
          /* Chart Sections Styling */
          .timeline-chart-section,
          .time-pattern-section,
@@ -796,6 +798,15 @@
             box-shadow: 0 4px 15px rgba(255, 165, 2, 0.3);
         }
 
+        .status-count {
+            background: linear-gradient(135deg, #3742fa, #2f3542);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(55, 66, 250, 0.3);
+            min-width: 60px;
+            width: auto;
+            padding: 0 12px;
+        }
+
         /* Realtime Camera Area */
         .realtime-camera-area {
             background: rgba(255, 255, 255, 0.06);
@@ -896,6 +907,64 @@
             box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3);
         }
 
+        /* Fullscreen Modal Styles */
+        .fullscreen-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 9999;
+            backdrop-filter: blur(10px);
+        }
+
+        .fullscreen-modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .fullscreen-content {
+            position: relative;
+            width: 95%;
+            height: 95%;
+            max-width: 1200px;
+            max-height: 900px;
+        }
+
+        .fullscreen-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 10px;
+        }
+
+        .fullscreen-close {
+            position: absolute;
+            top: -50px;
+            right: 0;
+            width: 45px;
+            height: 45px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 18px;
+            transition: all 0.3s ease;
+        }
+
+        .fullscreen-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+
         /* Recent Frame Section */
         .recent-frame-section {
             background: rgba(255, 255, 255, 0.06);
@@ -976,7 +1045,7 @@
         .fall-detection-badge {
             background: linear-gradient(135deg, #ff4757, #ff3838);
             color: #ffffff;
-            padding: 6px 12px;
+            padding: 8px 16px;
             border-radius: 20px;
             font-size: 12px;
             font-weight: 600;
@@ -984,6 +1053,9 @@
             letter-spacing: 0.5px;
             margin-top: 10px;
             box-shadow: 0 4px 15px rgba(255, 71, 87, 0.3);
+            white-space: nowrap;
+            min-width: fit-content;
+            text-align: center;
         }
 
         /* Latest Detection Frame */
@@ -1122,13 +1194,7 @@
             font-weight: 600;
         }
 
-        /* Statistics Section */
-        .stats-section {
-            display: flex;
-            gap: 15px;
-            margin-top: 15px;
-            height: 160px;
-        }
+
 
         .stat-card {
             border-radius: 20px;
@@ -1183,6 +1249,21 @@
         .stat-card.todays-detection {
             background: rgba(79, 172, 254, 0.15);
             box-shadow: 0 12px 40px rgba(79, 172, 254, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        
+        .stat-card.normal-saved {
+            background: rgba(46, 213, 115, 0.15);
+            box-shadow: 0 12px 40px rgba(46, 213, 115, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        
+        .stat-card.normal-filtered {
+            background: rgba(255, 159, 67, 0.15);
+            box-shadow: 0 12px 40px rgba(255, 159, 67, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        
+        .stat-card.filtering-efficiency {
+            background: rgba(116, 185, 255, 0.15);
+            box-shadow: 0 12px 40px rgba(116, 185, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
         }
 
         .stat-title {
@@ -1527,7 +1608,7 @@
                 <div class="content-grid">
                     <!-- Grid 1: System Health Monitor -->
                     <div class="div1 system-check-section">
-                        <h2 class="system-check-title">System Health Monitor</h2>
+                        <h2 class="system-check-title">System Monitor</h2>
                         <div class="system-status-list">
                             <div class="system-status-item">
                                 <span class="status-label">
@@ -1558,6 +1639,39 @@
                                 </span>
                                 <div class="status-badge status-online" id="firebaseStatus">Online</div>
                             </div>
+                            
+                            <!-- Filtering Statistics -->
+                            <div class="system-status-item">
+                                <span class="status-label">
+                                    <i class="fas fa-filter status-icon"></i>
+                                    Normal Activities Filtered
+                                </span>
+                                <div class="status-badge status-count" id="normalFilteredCount">0</div>
+                            </div>
+                            
+                            <div class="system-status-item">
+                                <span class="status-label">
+                                    <i class="fas fa-save status-icon"></i>
+                                    Normal Activities Saved
+                                </span>
+                                <div class="status-badge status-count" id="normalSavedCount">0</div>
+                            </div>
+                            
+                            <!--<div class="system-status-item">
+                                <span class="status-label">
+                                    <i class="fas fa-chart-line status-icon"></i>
+                                    Filtering Efficiency
+                                </span>
+                                <div class="status-badge status-count" id="filteringEfficiency">0%</div>
+                            </div> !-->
+                            
+                            <div class="system-status-item">
+                                <span class="status-label">
+                                    <i class="fas fa-exclamation-triangle status-icon"></i>
+                                    Fall Detected Saved
+                                </span>
+                                <div class="status-badge status-count" id="totalFallsCount">0</div>
+                            </div>
                         </div>
                     </div>
 
@@ -1566,9 +1680,19 @@
                         <h3 class="realtime-camera-title">Live Camera Feed</h3>
                         <div class="camera-status-indicator"></div>
                         <img id="videoFeed" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQwIiBoZWlnaHQ9IjQ4MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPldhaXRpbmcgZm9yIHZpZGVvIGZlZWQuLi48L3RleHQ+PC9zdmc+" alt="Realtime camera" style="width: 100%; height: 100%; object-fit: cover;">
-                        <button class="zoom-button">
+                        <button class="zoom-button" id="zoomButton">
                              <i class="fas fa-search-plus"></i>
                          </button>
+                    </div>
+
+                    <!-- Fullscreen Modal -->
+                    <div id="fullscreenModal" class="fullscreen-modal">
+                        <div class="fullscreen-content">
+                            <button class="fullscreen-close" id="closeFullscreen">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <img id="fullscreenImage" class="fullscreen-image" alt="Fullscreen camera feed">
+                        </div>
                     </div>
 
                     <!-- Grid 3: Latest Detection Frame -->
@@ -1643,6 +1767,8 @@
                             </div>
                         </div>
                     </div>
+                    
+
                  </div>
             </div>
         </div>
@@ -1690,7 +1816,10 @@
         let stats = {
             totalFalls: 0,
             todayFalls: 0,
-            totalFrames: 0
+            totalFrames: 0,
+            normalSaved: 0,
+            normalFiltered: 0,
+            filteringEfficiency: 0.0
         };
         
         let notifications = [];
@@ -1707,6 +1836,7 @@
                 initializeNotificationSystem();
                 initializeSystemLog();
                 loadInitialStats();
+                initializeFullscreenFeature();
                 
                 // Initialize camera status indicator to offline (red) by default
                 updateCameraStatusIndicator(false);
@@ -1770,6 +1900,24 @@
                 updateSystemHealth('databaseStatus', data.database_connected);
                 // Firebase status should match database status since they use the same Firebase instance
                 updateSystemHealth('firebaseStatus', data.database_connected);
+            });
+            
+            socket.on('stats_update', function(data) {
+                console.log('Stats update received:', data);
+                // Update filtering statistics
+                if (data.normal_activities_saved !== undefined) {
+                    stats.normalSaved = data.normal_activities_saved;
+                }
+                if (data.normal_activities_filtered !== undefined) {
+                    stats.normalFiltered = data.normal_activities_filtered;
+                }
+                if (data.filtering_efficiency !== undefined) {
+                    stats.filteringEfficiency = data.filtering_efficiency;
+                }
+                if (data.fall_events !== undefined) {
+                    stats.totalFalls = data.fall_events;
+                }
+                updateStatsDisplay();
             });
         }
 
@@ -1885,7 +2033,23 @@
             }
             
             if (detectionBadge) {
-                detectionBadge.style.display = 'block';
+                // Check if this is a fall detection
+                const isFall = data.is_fall === true || data.label === 'Jatuh' || data.prediction === 'Fall Detected';
+                
+                if (isFall) {
+                    const confidence = data.confidence ? (data.confidence * 100).toFixed(1) : '0.0';
+                    detectionBadge.textContent = `Fall Detected (${confidence}%)`;
+                    detectionBadge.style.display = 'block';
+                    
+                    // Auto-hide badge after 10 seconds to simulate cooldown period
+                    setTimeout(() => {
+                        if (detectionBadge.textContent.includes('Fall Detected')) {
+                            detectionBadge.style.display = 'none';
+                        }
+                    }, 10000);
+                } else {
+                    detectionBadge.style.display = 'none';
+                }
             }
         }
 
@@ -1893,8 +2057,23 @@
             const totalFallsElement = document.getElementById('totalFalls');
             const todayFallsElement = document.getElementById('todayFalls');
             
+            // Update existing stats
             if (totalFallsElement) totalFallsElement.textContent = stats.totalFalls;
             if (todayFallsElement) todayFallsElement.textContent = stats.todayFalls;
+            
+            // Update filtering statistics
+            const totalFallsCountElement = document.getElementById('totalFallsCount');
+            const normalSavedCountElement = document.getElementById('normalSavedCount');
+            const normalFilteredCountElement = document.getElementById('normalFilteredCount');
+            const filteringEfficiencyElement = document.getElementById('filteringEfficiency');
+            
+            if (totalFallsCountElement) totalFallsCountElement.textContent = stats.totalFalls || 0;
+            if (normalSavedCountElement) normalSavedCountElement.textContent = stats.normalSaved || 0;
+            if (normalFilteredCountElement) normalFilteredCountElement.textContent = stats.normalFiltered || 0;
+            if (filteringEfficiencyElement) {
+                const efficiency = stats.filteringEfficiency || 0;
+                filteringEfficiencyElement.textContent = efficiency.toFixed(1) + '%';
+            }
         }
 
         function addDetectionLog(data, isFall) {
@@ -2785,6 +2964,62 @@
              loadFirebaseData();
          }
         
+        // Fullscreen functionality
+        function initializeFullscreenFeature() {
+            const zoomButton = document.getElementById('zoomButton');
+            const fullscreenModal = document.getElementById('fullscreenModal');
+            const fullscreenImage = document.getElementById('fullscreenImage');
+            const closeButton = document.getElementById('closeFullscreen');
+            const videoFeed = document.getElementById('videoFeed');
+
+            // Open fullscreen
+            zoomButton.addEventListener('click', function() {
+                // Copy the current video feed source to fullscreen image
+                fullscreenImage.src = videoFeed.src;
+                fullscreenModal.classList.add('active');
+                document.body.style.overflow = 'hidden'; // Prevent scrolling
+            });
+
+            // Close fullscreen
+            function closeFullscreen() {
+                fullscreenModal.classList.remove('active');
+                document.body.style.overflow = 'auto'; // Restore scrolling
+            }
+
+            // Close button click
+            closeButton.addEventListener('click', closeFullscreen);
+
+            // Close on modal background click
+            fullscreenModal.addEventListener('click', function(e) {
+                if (e.target === fullscreenModal) {
+                    closeFullscreen();
+                }
+            });
+
+            // Close on Escape key
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && fullscreenModal.classList.contains('active')) {
+                    closeFullscreen();
+                }
+            });
+
+            // Update fullscreen image when video feed changes
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+                        if (fullscreenModal.classList.contains('active')) {
+                            fullscreenImage.src = videoFeed.src;
+                        }
+                    }
+                });
+            });
+
+            observer.observe(videoFeed, {
+                attributes: true,
+                attributeFilter: ['src']
+            });
+        }
+
         // Expose test functions globally for console testing
         window.testNotification = testNotification;
         window.testNormalNotification = testNormalNotification;

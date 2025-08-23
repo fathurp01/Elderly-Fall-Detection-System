@@ -40,16 +40,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FallDetectionServer:
-    def __init__(self, sequence_length=61, confidence_threshold=0.7):
+    def __init__(self, sequence_length=61, confidence_threshold=0.7, fall_cooldown_seconds=10, normal_activity_sample_rate=0.1):
         """
         Initialize Fall Detection Server
         
         Args:
             sequence_length: Number of frames in a sequence for LSTM
             confidence_threshold: Minimum confidence for fall detection
+            fall_cooldown_seconds: Cooldown period between fall detections (seconds)
+            normal_activity_sample_rate: Sampling rate for normal activities (0.1 = 10%)
         """
         self.sequence_length = sequence_length
         self.confidence_threshold = confidence_threshold
+        self.fall_cooldown_seconds = fall_cooldown_seconds
+        self.normal_activity_sample_rate = normal_activity_sample_rate
+        self.last_fall_detection_time = None
+        self.normal_activity_counter = 0
+        self.last_normal_save_time = None
         
         # Initialize Flask app
         self.app = Flask(__name__)
@@ -83,8 +90,11 @@ class FallDetectionServer:
             'total_frames': 0,
             'total_detections': 0,
             'fall_events': 0,
+            'normal_activities_saved': 0,
+            'normal_activities_filtered': 0,
             'last_detection': None,
-            'server_start_time': datetime.now().isoformat()
+            'server_start_time': datetime.now().isoformat(),
+            'filtering_efficiency': 0.0
         }
         
         # Recent events for dashboard
@@ -602,17 +612,40 @@ class FallDetectionServer:
                 'bbox_sequence': sequence[-self.sequence_length:]
             }
             
-            # Log all events (both fall and normal activity)
-            self.log_event(event_data)
+            # Check cooldown for ANY fall classification BEFORE any processing
+            is_fall_classification = label == "Jatuh"  # Any fall classification, regardless of confidence
+            is_fall_detection = is_fall_classification and confidence >= self.confidence_threshold
+            should_process_fall = True
             
-            # Save to Firebase (save all events for comprehensive logging)
-            self.save_to_firebase(event_data)
+            if is_fall_classification:  # Apply cooldown to all fall classifications
+                current_time = datetime.now()
+                if self.last_fall_detection_time is not None:
+                    time_since_last_fall = (current_time - self.last_fall_detection_time).total_seconds()
+                    if time_since_last_fall < self.fall_cooldown_seconds:
+                        logger.info(f"Fall detection suppressed - cooldown active ({time_since_last_fall:.1f}s < {self.fall_cooldown_seconds}s)")
+                        should_process_fall = False
+                        # Skip all processing for this fall classification
+                        return
+                
+                if should_process_fall and is_fall_detection:  # Only update time for actual detections (above threshold)
+                    # Update last fall detection time
+                    self.last_fall_detection_time = current_time
             
-            # Add to recent events
-            self.recent_events.append(event_data)
+            # Log events (skip fall classifications during cooldown)
+            if not is_fall_classification or should_process_fall:
+                self.log_event(event_data)
             
-            # Broadcast to dashboard
-            self.socketio.emit('detection_result', event_data)
+            # Save to Firebase (only save actual fall detections above threshold, skip during cooldown)
+            if (not is_fall_classification and should_process_fall) or (is_fall_detection and should_process_fall):
+                self.save_to_firebase(event_data)
+            
+            # Add to recent events (only add actual fall detections above threshold, skip during cooldown)
+            if (not is_fall_classification and should_process_fall) or (is_fall_detection and should_process_fall):
+                self.recent_events.append(event_data)
+            
+            # Broadcast to dashboard (only broadcast actual fall detections above threshold, skip during cooldown)
+            if (not is_fall_classification and should_process_fall) or (is_fall_detection and should_process_fall):
+                self.socketio.emit('detection_result', event_data)
             
             # Emit system status with proper camera status check
             camera_online = len(self.bbox_buffer) > 0 and self.stats.get('last_detection')
@@ -629,13 +662,16 @@ class FallDetectionServer:
                 'database_connected': self.firebase_handler.initialized if self.firebase_handler else False
             })
             
-            # Handle fall detection
-            if label == "Jatuh" and confidence >= self.confidence_threshold:
-                self.handle_fall_detection(event_data)
+            # Handle fall detection and logging
+            if is_fall_detection and should_process_fall:
+                self.handle_fall_alert(event_data)  # Renamed to avoid confusion
                 logger.info(f"Classification: {label} (confidence: {confidence:.2f}) - FALL ALERT!")
             elif label == "Jatuh":
-                # Log fall detection even if below threshold
-                logger.info(f"Classification: {label} (confidence: {confidence:.2f}) - Below threshold")
+                # Log fall detection even if below threshold or during cooldown
+                if not should_process_fall:
+                    logger.info(f"Classification: {label} (confidence: {confidence:.2f}) - SUPPRESSED (cooldown)")
+                else:
+                    logger.info(f"Classification: {label} (confidence: {confidence:.2f}) - Below threshold")
             else:
                 # Log normal activity as well for comprehensive monitoring
                 logger.info(f"Classification: {label} (confidence: {confidence:.2f})")
@@ -643,8 +679,9 @@ class FallDetectionServer:
         except Exception as e:
             logger.error(f"Error in sequence classification: {e}")
             
-    def handle_fall_detection(self, event_data):
-        """Handle detected fall event"""
+    def handle_fall_alert(self, event_data):
+        """Handle fall alert creation and processing (cooldown already checked)"""
+        # Cooldown is already checked in classify_sequence, so we can proceed directly
         self.stats['fall_events'] += 1
         
         # Create fall alert
@@ -691,12 +728,35 @@ class FallDetectionServer:
         # self.send_notification(alert_data)
         
     def save_to_firebase(self, event_data):
-        """Save detection event to Firebase (all events for comprehensive logging)"""
+        """Save detection event to Firebase with smart filtering for normal activities"""
         try:
-            if self.firebase_handler:
-                # Save all events for comprehensive logging
-                logger.debug(f"Saving event to Firebase: {event_data['label']} (confidence: {event_data['confidence']:.2f})")
+            if not self.firebase_handler:
+                logger.warning("Firebase handler not available")
+                return
                 
+            is_fall = event_data['label'] == "Jatuh"
+            current_time = datetime.now()
+            
+            # Apply smart filtering for normal activities, fall detections are controlled by cooldown in classify_sequence
+            if is_fall:
+                should_save = True
+                logger.debug(f"Saving fall detection to Firebase: confidence {event_data['confidence']:.2f}")
+            else:
+                # Smart filtering for normal activities
+                should_save = self._should_save_normal_activity(current_time, event_data['confidence'])
+                if should_save:
+                    self.stats['normal_activities_saved'] += 1
+                    logger.debug(f"Saving normal activity sample to Firebase: confidence {event_data['confidence']:.2f}")
+                else:
+                    self.stats['normal_activities_filtered'] += 1
+                    # Update filtering efficiency
+                    total_normal = self.stats['normal_activities_saved'] + self.stats['normal_activities_filtered']
+                    if total_normal > 0:
+                        self.stats['filtering_efficiency'] = (self.stats['normal_activities_filtered'] / total_normal) * 100
+                    logger.debug(f"Skipping normal activity save (filtered): confidence {event_data['confidence']:.2f}")
+                    return
+            
+            if should_save:
                 # Flatten bbox_sequence to avoid nested arrays
                 bbox_sequence_flat = []
                 if 'bbox_sequence' in event_data and event_data['bbox_sequence']:
@@ -710,24 +770,50 @@ class FallDetectionServer:
                             })
                 
                 # Add additional metadata
-                is_fall = event_data['label'] == "Jatuh"
                 firebase_data = {
                     'timestamp': event_data['timestamp'],
                     'label': event_data['label'],
                     'confidence': float(event_data['confidence']),
-                    'type': 'fall' if is_fall else 'normal',  # Add type field for frontend compatibility
+                    'type': 'fall' if is_fall else 'normal',
                     'is_fall': is_fall,
                     'bbox_sequence': bbox_sequence_flat,
                     'device_id': 'laptop_server',
-                    'session_id': getattr(self, 'session_id', 'default_session')
+                    'session_id': getattr(self, 'session_id', 'default_session'),
+                    'filtered': not is_fall  # Mark if this was filtered/sampled
                 }
                 
                 self.firebase_handler.save_detection(firebase_data)
                 logger.info(f"Saved detection to Firebase: {event_data['label']} ({event_data['confidence']:.2f})")
-            else:
-                logger.warning("Firebase handler not available")
+                
         except Exception as e:
             logger.error(f"Error saving to Firebase: {e}")
+    
+    def _should_save_normal_activity(self, current_time, confidence):
+        """Determine if normal activity should be saved based on smart filtering"""
+        import random
+        
+        # Strategy 1: Sampling rate - only save a percentage of normal activities
+        if random.random() > self.normal_activity_sample_rate:
+            return False
+        
+        # Strategy 2: Time-based filtering - don't save too frequently
+        min_interval_seconds = 30  # Minimum 30 seconds between normal activity saves
+        if self.last_normal_save_time is not None:
+            time_since_last_save = (current_time - self.last_normal_save_time).total_seconds()
+            if time_since_last_save < min_interval_seconds:
+                return False
+        
+        # Strategy 3: Confidence-based filtering - prioritize higher confidence normal activities
+        confidence_threshold = 0.6  # Only save normal activities with moderate confidence
+        if confidence < confidence_threshold:
+            return False
+        
+        # Update last save time
+        self.last_normal_save_time = current_time
+        self.normal_activity_counter += 1
+        
+        logger.debug(f"Normal activity passed filtering (sample #{self.normal_activity_counter})")
+        return True
             
     def log_event(self, event_data):
         """Log event to CSV file"""
@@ -819,11 +905,15 @@ def main():
     parser.add_argument('--port', type=int, default=5001, help='Port to run server on')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind server to')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--cooldown', type=int, default=10, help='Fall detection cooldown period in seconds')
+    parser.add_argument('--normal-sample-rate', type=float, default=0.1, help='Sampling rate for normal activities (0.1 = 10%)')
     args = parser.parse_args()
     
     # Configuration from environment variables with command line overrides
     SEQUENCE_LENGTH = 61  # Match LSTM training configuration
     CONFIDENCE_THRESHOLD = 0.7
+    FALL_COOLDOWN_SECONDS = args.cooldown if args.cooldown != 10 else int(os.getenv('FALL_COOLDOWN_SECONDS', '10'))
+    NORMAL_SAMPLE_RATE = args.normal_sample_rate if args.normal_sample_rate != 0.1 else float(os.getenv('NORMAL_ACTIVITY_SAMPLE_RATE', '0.1'))
     HOST = args.host if args.host != '0.0.0.0' else os.getenv('SERVER_HOST', '0.0.0.0')
     PORT = args.port if args.port != 5001 else int(os.getenv('SERVER_PORT', '5001'))
     DEBUG = args.debug or os.getenv('DEBUG', 'False').lower() == 'true'
@@ -831,7 +921,9 @@ def main():
     # Create and run server
     server = FallDetectionServer(
         sequence_length=SEQUENCE_LENGTH,
-        confidence_threshold=CONFIDENCE_THRESHOLD
+        confidence_threshold=CONFIDENCE_THRESHOLD,
+        fall_cooldown_seconds=FALL_COOLDOWN_SECONDS,
+        normal_activity_sample_rate=NORMAL_SAMPLE_RATE
     )
     
     try:
