@@ -58,6 +58,10 @@ class FallDetectionServer:
         self.normal_activity_counter = 0
         self.last_normal_save_time = None
         
+        # Smart buffering optimization - classify every N frames instead of every frame
+        self.classification_interval = 3  # Classify every 3 frames for better performance
+        self.frame_counter = 0
+        
         # Initialize Flask app
         self.app = Flask(__name__)
         self.app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'fall_detection_secret_key')
@@ -82,8 +86,9 @@ class FallDetectionServer:
         self.bbox_buffer = deque(maxlen=sequence_length)
         self.timestamp_buffer = deque(maxlen=sequence_length)
         
-        # LSTM model
-        self.lstm_model = LSTMModel()
+        # LSTM model - optimized loading
+        self.lstm_model = None
+        self._initialize_lstm_model()
         
         # Statistics
         self.stats = {
@@ -125,6 +130,19 @@ class FallDetectionServer:
         
         # Initialize log file
         self.init_log_file()
+    
+    def _initialize_lstm_model(self):
+        """Initialize LSTM model with optimized loading"""
+        try:
+            logger.info("Initializing LSTM model...")
+            self.lstm_model = LSTMModel()
+            if self.lstm_model.is_loaded:
+                logger.info("LSTM model loaded and ready for predictions")
+            else:
+                logger.warning("LSTM model loaded but using placeholder mode")
+        except Exception as e:
+            logger.error(f"Failed to initialize LSTM model: {e}")
+            self.lstm_model = None
     
     def _process_timeline_data(self, logs):
         """Process logs for timeline chart (last 7 days)"""
@@ -568,8 +586,10 @@ class FallDetectionServer:
             self.bbox_buffer.append(bbox)
             self.timestamp_buffer.append(timestamp)
             
-            # Process when buffer is full
-            if len(self.bbox_buffer) == self.sequence_length:
+            # Smart buffering: only classify at intervals when buffer is full
+            self.frame_counter += 1
+            if (len(self.bbox_buffer) >= self.sequence_length and 
+                self.frame_counter % self.classification_interval == 0):
                 self.classify_sequence()
                 
     def process_sequence_data(self, data):
@@ -587,6 +607,11 @@ class FallDetectionServer:
     def classify_sequence(self, sequence=None, timestamps=None):
         """Classify sequence using LSTM model"""
         try:
+            # Check if LSTM model is available
+            if self.lstm_model is None:
+                logger.warning("LSTM model not available, skipping classification")
+                return
+                
             # Use provided sequence or buffer
             if sequence is None:
                 sequence = list(self.bbox_buffer)
@@ -910,7 +935,7 @@ def main():
     args = parser.parse_args()
     
     # Configuration from environment variables with command line overrides
-    SEQUENCE_LENGTH = 61  # Match LSTM training configuration
+    SEQUENCE_LENGTH = 41  # Match LSTM training configuration
     CONFIDENCE_THRESHOLD = 0.7
     FALL_COOLDOWN_SECONDS = args.cooldown if args.cooldown != 10 else int(os.getenv('FALL_COOLDOWN_SECONDS', '10'))
     NORMAL_SAMPLE_RATE = args.normal_sample_rate if args.normal_sample_rate != 0.1 else float(os.getenv('NORMAL_ACTIVITY_SAMPLE_RATE', '0.1'))

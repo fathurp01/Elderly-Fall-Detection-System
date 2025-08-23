@@ -81,21 +81,27 @@ class LSTMModel:
         
     def load_model(self):
         """
-        Load pre-trained LSTM model and scaler
+        Load pre-trained LSTM model and scaler with optimization
         """
         try:
             if os.path.exists(self.model_path) and TENSORFLOW_AVAILABLE:
-                # Load the trained model
+                logger.info(f"Loading LSTM model from {self.model_path}...")
+                
+                # Load the trained model without compilation for faster loading
                 self.model = tf.keras.models.load_model(self.model_path, compile=False)
                 
-                # Recompile the model with appropriate loss and metrics
+                # Compile once with optimized settings
                 self.model.compile(
-                    optimizer='adam',
+                    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
                     loss='binary_crossentropy',
-                    metrics=['accuracy', 'precision', 'recall']
+                    metrics=['accuracy']
                 )
                 
-                logger.info(f"LSTM model loaded successfully from {self.model_path}")
+                # Warm up the model with a dummy prediction for faster subsequent predictions
+                dummy_input = np.zeros((1, self.sequence_length, self.input_features), dtype=np.float32)
+                _ = self.model.predict(dummy_input, verbose=0)
+                
+                logger.info(f"LSTM model loaded and warmed up successfully from {self.model_path}")
                 self.is_loaded = True
                 
                 # Load scaler (only once during initialization)

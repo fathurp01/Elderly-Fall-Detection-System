@@ -19,6 +19,11 @@ import os
 from dotenv import load_dotenv
 from queue import Queue, Full, Empty
 import multiprocessing
+import socket
+import struct
+import hashlib
+from functools import lru_cache
+import subprocess
 try:
     import psutil
 except ImportError:
@@ -52,6 +57,17 @@ class PiClient:
         
         # Initialize YOLO model
         self.model = None
+        
+        # Frame skipping & caching optimization for RPi 4
+        self.inference_interval = 3  # Process every 3rd frame for RPi 4
+        self.frame_counter = 0
+        self.last_detections = []
+        self.detection_cache_time = time.time()
+        self.cache_duration = 0.15  # 150ms cache for RPi 4
+        
+        # Conditional encoding optimization
+        self.last_frame_encoded = 0
+        self.encoding_interval = 5  # Encode every 5th frame when no detection
         
         # Initialize SocketIO client
         self.sio = socketio.Client()
@@ -90,6 +106,31 @@ class PiClient:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         self.reconnect_delay = 5
+        
+        # Network monitoring for adaptive compression
+        self.network_latency = 0
+        self.packet_loss_rate = 0
+        self.last_ping_time = 0
+        self.ping_interval = 5  # seconds
+        
+        # UDP socket for video streaming (fallback)
+        self.udp_socket = None
+        self.use_udp_video = False
+        self.udp_port = 5002
+        
+        # Hardware encoder detection
+        self.hardware_encoder_available = self._detect_hardware_encoder()
+        
+        # Smart caching
+        self.frame_cache = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
+        
+        # Adaptive compression parameters
+        self.base_jpeg_quality = 65
+        self.min_jpeg_quality = 30
+        self.max_jpeg_quality = 85
+        self.adaptive_resize_factor = 0.5
         
         # Performance monitoring
         self.frame_stats = {
@@ -163,12 +204,27 @@ class PiClient:
             return False
             
     def initialize_model(self):
-        """Initialize YOLOv8 model"""
+        """Initialize YOLOv8 model with RPi 4 optimizations"""
         try:
             # Load custom trained YOLOv8 model
             model_path = os.getenv('YOLO_MODEL_PATH', os.path.join(os.path.dirname(__file__), 'yolov8n.pt'))
             self.model = YOLO(model_path)
-            logger.info(f"Custom YOLOv8 model loaded successfully from {model_path}")
+            
+            # Model optimization for Raspberry Pi 4
+            self.model.to('cpu')  # Ensure CPU usage
+            
+            # Optimize PyTorch for RPi 4 (4 cores)
+            try:
+                import torch
+                # Use 2 threads for inference on RPi 4 (half of available cores)
+                torch.set_num_threads(2)
+                # Enable optimizations
+                torch.set_num_interop_threads(1)
+                logger.info(f"PyTorch optimized: {torch.get_num_threads()} inference threads, {torch.get_num_interop_threads()} interop threads")
+            except ImportError:
+                logger.warning("PyTorch optimization not available")
+            
+            logger.info(f"YOLOv8n model loaded and optimized for RPi 4 from {model_path}")
             return True
             
         except Exception as e:
@@ -177,7 +233,17 @@ class PiClient:
             try:
                 fallback_path = os.path.join(os.path.dirname(__file__), 'yolov8n.pt')
                 self.model = YOLO(fallback_path)
-                logger.info(f"Fallback: YOLOv8 model loaded successfully from {fallback_path}")
+                self.model.to('cpu')
+                
+                # Apply same optimizations to fallback
+                try:
+                    import torch
+                    torch.set_num_threads(2)
+                    torch.set_num_interop_threads(1)
+                except ImportError:
+                    pass
+                    
+                logger.info(f"Fallback: YOLOv8n model loaded and optimized for RPi 4 from {fallback_path}")
                 return True
             except Exception as fallback_e:
                 logger.error(f"Failed to load fallback model: {fallback_e}")
@@ -187,6 +253,10 @@ class PiClient:
         """Connect to the laptop server"""
         try:
             self.sio.connect(self.server_url)
+            # Setup UDP socket for video streaming if needed
+            if self._setup_udp_socket():
+                self.use_udp_video = True
+                logger.info("UDP video streaming enabled")
             # Start sender thread after successful connection
             self.start_sender_thread()
             return True
@@ -309,9 +379,20 @@ class PiClient:
         return stats
             
     def detect_humans(self, frame):
-        """Detect humans in frame and return bounding boxes"""
+        """Detect humans in frame with frame skipping & caching optimization for RPi 4"""
         try:
-            # Run YOLOv8 inference
+            self.frame_counter += 1
+            current_time = time.time()
+            
+            # Frame skipping optimization - process every 3rd frame on RPi 4
+            if (self.frame_counter % self.inference_interval != 0 and 
+                current_time - self.detection_cache_time < self.cache_duration):
+                # Return cached detections
+                logger.debug(f"Using cached detections (frame {self.frame_counter})")
+                return self.last_detections
+            
+            # Run YOLOv8 inference on selected frames
+            logger.debug(f"Running inference on frame {self.frame_counter}")
             results = self.model(frame, verbose=False)
             
             human_detections = []
@@ -324,7 +405,7 @@ class PiClient:
                         if int(box.cls[0]) == 0:  # person class
                             confidence = float(box.conf[0])
                             
-                            # Only include detections with confidence >= 0.5
+                            # Keep original confidence threshold (0.5)
                             if confidence >= 0.5:
                                 # Get bounding box coordinates
                                 x1, y1, x2, y2 = box.xyxy[0].tolist()
@@ -334,18 +415,27 @@ class PiClient:
                                     "confidence": confidence
                                 }
                                 human_detections.append(detection)
-                                
+            
+            # Update cache
+            self.last_detections = human_detections
+            self.detection_cache_time = current_time
+            
             return human_detections
             
         except Exception as e:
             logger.error(f"Error in human detection: {e}")
-            return []
+            return self.last_detections  # Return cached detections on error
             
     def send_frame_data(self, detections, timestamp):
-        """Send per-frame detection data using queue"""
+        """Send individual frame detection data to server
+        
+        IMPORTANT: This data is used for LSTM processing and MUST NOT be modified
+        by any optimization. Only video frames can be optimized for transmission.
+        """
         if not self.connected or not detections:
             return
             
+        # LSTM data - DO NOT MODIFY - Critical for fall detection accuracy
         for detection in detections:
             data = {
                 "frame_id": self.frame_id,
@@ -354,6 +444,7 @@ class PiClient:
                 "timestamp": timestamp
             }
             
+            # Always use reliable WebSocket for LSTM data (never UDP)
             success = self.queue_data('bbox_data', data)
             if success:
                 logger.debug(f"Queued frame data: {data}")
@@ -361,20 +452,30 @@ class PiClient:
                 logger.warning(f"Failed to queue frame data for frame {self.frame_id}")
                 
     def send_sequence_data(self):
-        """Send sequence of bounding boxes using queue"""
+        """Send buffered sequence data to server for LSTM processing
+        
+        IMPORTANT: This data is used for LSTM processing and MUST NOT be modified
+        by any optimization. Only video frames can be optimized for transmission.
+        """
         if not self.connected or len(self.bbox_buffer) < self.sequence_length:
             return
             
+        # LSTM sequence data - DO NOT MODIFY - Critical for fall detection accuracy
         data = {
             "sequence": list(self.bbox_buffer),
             "timestamps": list(self.timestamp_buffer)
         }
         
+        # Always use reliable WebSocket for LSTM data (never UDP)
         success = self.queue_data('bbox_data', data)
         if success:
             logger.debug(f"Queued sequence data with {len(self.bbox_buffer)} frames")
         else:
             logger.warning(f"Failed to queue sequence data")
+            
+        # Clear buffers after sending
+        self.bbox_buffer.clear()
+        self.timestamp_buffer.clear()
             
     def run(self):
         """Main processing loop"""
@@ -428,40 +529,101 @@ class PiClient:
                     bbox = detection["bbox"]
                     cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
                 
-                # Adaptive JPEG quality based on queue congestion
-                queue_utilization = (self.send_queue.qsize() / self.send_queue.maxsize) * 100
-                if queue_utilization > 80:
-                    jpeg_quality = 60  # Reduce quality when congested
-                elif queue_utilization > 60:
-                    jpeg_quality = 70  # Medium quality
-                else:
-                    jpeg_quality = 80  # High quality
+                # Adaptive compression based on network conditions
+                jpeg_quality, resize_factor = self._adaptive_compression_params()
                 
-                # Encode frame as JPEG and convert to base64
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-                frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                # Conditional frame encoding optimization for RPi 4
+                should_encode = False
                 
-                # Send video frame to server using queue
-                if self.connected:
-                    success = self.queue_data('video_frame', {
+                if detections:
+                    # Always encode when there are detections
+                    should_encode = True
+                    self.last_frame_encoded = self.frame_id
+                elif self.frame_id - self.last_frame_encoded >= self.encoding_interval:
+                    # Encode every 5th frame when no detections (maintain connection)
+                    should_encode = True
+                    self.last_frame_encoded = self.frame_id
+                
+                if should_encode:
+                    # Adaptive frame resizing based on network conditions
+                    new_width = int(640 * resize_factor)
+                    new_height = int(480 * resize_factor)
+                    transmission_frame = cv2.resize(frame, (new_width, new_height))
+                    
+                    # Smart caching - check if similar frame already encoded
+                    frame_hash = hashlib.md5(transmission_frame.tobytes()).hexdigest()
+                    cached_frame = self._get_cached_frame_hash(frame_hash)
+                    
+                    if cached_frame:
+                        frame_base64 = cached_frame
+                        self.cache_hits += 1
+                        logger.debug(f"Cache hit for frame {self.frame_id}")
+                    else:
+                        self.cache_misses += 1
+                        frame_base64 = None  # Initialize variable
+                        
+                        # Try hardware encoding first
+                        if self.hardware_encoder_available and jpeg_quality > 50:
+                            frame_base64 = self._hardware_encode_frame(transmission_frame, jpeg_quality)
+                        
+                        # Fallback to software encoding
+                        if not frame_base64:
+                            _, buffer = cv2.imencode('.jpg', transmission_frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
+                            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                        
+                        # Cache the encoded frame
+                        self._cache_encoded_frame(frame_hash, frame_base64)
+                    
+                    # Choose transmission method based on network conditions
+                    frame_payload = {
                         'frame': frame_base64,
-                        'timestamp': timestamp
-                    })
+                        'timestamp': timestamp,
+                        'frame_id': self.frame_id,
+                        'quality': jpeg_quality,
+                        'resolution': f'{new_width}x{new_height}'
+                    }
+                    
+                    # Use UDP for video if latency is high and UDP is available
+                    if self.network_latency > 200 and self.use_udp_video and self.udp_socket:
+                        success = self._send_udp_frame(frame_base64)
+                        if not success:
+                            # Fallback to WebSocket
+                            success = self.queue_data('video_frame', frame_payload)
+                    else:
+                        # Use WebSocket for reliable delivery
+                        success = self.queue_data('video_frame', frame_payload)
+                    
                     if not success:
-                        logger.debug("Failed to queue video frame data")
+                        logger.debug("Failed to send video frame data")
+                    else:
+                        logger.debug(f"Frame sent (detections: {len(detections)}, quality: {jpeg_quality}, method: {'UDP' if self.use_udp_video and self.network_latency > 200 else 'WebSocket'})")
+                else:
+                    logger.debug(f"Frame encoding skipped (no detections, last encoded: {self.last_frame_encoded})")
                 
-                # Send heartbeat every 30 frames (~1 second) to maintain connection status
+                # Send enhanced heartbeat with optimization metrics every 30 frames (~1 second)
                 if self.frame_id % 30 == 0 and self.connected:
+                    total_cache_requests = self.cache_hits + self.cache_misses
+                    cache_hit_rate = (self.cache_hits / max(total_cache_requests, 1)) * 100
+                    
                     heartbeat_data = {
                         'timestamp': timestamp,
                         'frame_id': self.frame_id,
                         'status': 'active',
                         'detections_count': len(detections),
-                        'queue_stats': self.get_queue_stats()
+                        'queue_stats': self.get_queue_stats(),
+                        'optimization_stats': {
+                            'network_latency': self.network_latency,
+                            'cache_hit_rate': cache_hit_rate,
+                            'hardware_encoder': self.hardware_encoder_available,
+                            'udp_enabled': self.use_udp_video,
+                            'adaptive_quality': jpeg_quality,
+                            'adaptive_resolution': f'{new_width}x{new_height}' if should_encode else 'N/A'
+                        }
                     }
+                    # Always use WebSocket for heartbeat (reliable delivery)
                     success = self.queue_data('heartbeat', heartbeat_data)
                     if success:
-                        logger.debug(f"Queued heartbeat at frame {self.frame_id}")
+                        logger.debug(f"Queued enhanced heartbeat at frame {self.frame_id}")
                     else:
                         logger.warning(f"Failed to queue heartbeat at frame {self.frame_id}")
                 
@@ -503,8 +665,29 @@ class PiClient:
                 # if cv2.waitKey(1) & 0xFF == ord('q'):
                 #     break
                     
-                # Small delay to control FPS
-                time.sleep(0.033)  # ~30 FPS
+                # Adaptive FPS control for RPi 4 based on CPU usage
+                if psutil:
+                    try:
+                        cpu_usage = psutil.cpu_percent(interval=0)
+                        if cpu_usage > 85:  # High CPU usage on RPi 4
+                            time.sleep(0.1)   # 10 FPS
+                            logger.debug(f"High CPU ({cpu_usage}%), reduced to 10 FPS")
+                        elif cpu_usage > 70:  # Medium CPU usage
+                            time.sleep(0.066) # 15 FPS
+                            logger.debug(f"Medium CPU ({cpu_usage}%), reduced to 15 FPS")
+                        elif cpu_usage > 50:  # Normal CPU usage
+                            time.sleep(0.05)  # 20 FPS
+                        else:  # Low CPU usage
+                            time.sleep(0.033) # 30 FPS
+                    except Exception as e:
+                        logger.debug(f"CPU monitoring error: {e}")
+                        time.sleep(0.05)  # Default 20 FPS for RPi 4
+                else:
+                    # Default adaptive FPS for RPi 4 without psutil
+                    if detections:
+                        time.sleep(0.05)  # 20 FPS when detections found
+                    else:
+                        time.sleep(0.066) # 15 FPS when no detections
                 
         except KeyboardInterrupt:
             logger.info("Stopping Pi Client...")
@@ -534,6 +717,14 @@ class PiClient:
             except:
                 break
         
+        # Close UDP socket
+        if self.udp_socket:
+            try:
+                self.udp_socket.close()
+                logger.info("UDP socket closed")
+            except Exception as e:
+                logger.error(f"Error closing UDP socket: {e}")
+        
         # Cleanup camera resources
         if hasattr(self, 'camera_type') and self.camera_type == "picamera":
             if hasattr(self, 'picam'):
@@ -557,6 +748,12 @@ class PiClient:
             except Exception as e:
                 logger.error(f"Error disconnecting from server: {e}")
         
+        # Log cache statistics
+        total_cache_requests = self.cache_hits + self.cache_misses
+        if total_cache_requests > 0:
+            cache_hit_rate = (self.cache_hits / total_cache_requests) * 100
+            logger.info(f"Cache statistics - Hit rate: {cache_hit_rate:.1f}% ({self.cache_hits}/{total_cache_requests})")
+        
         logger.info("Cleanup completed successfully")
     
     def _get_available_memory(self):
@@ -568,6 +765,148 @@ class PiClient:
                 logger.debug(f"Memory detection error: {e}")
         # Fallback estimate for Raspberry Pi 4
         return 1024 * 1024 * 1024  # 1GB default
+    
+    def _detect_hardware_encoder(self):
+        """Detect if hardware encoder is available on Raspberry Pi"""
+        try:
+            # Check for Raspberry Pi hardware encoder
+            result = subprocess.run(['which', 'ffmpeg'], capture_output=True, text=True)
+            if result.returncode == 0:
+                # Check for h264_omx encoder
+                result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
+                if 'h264_omx' in result.stdout or 'h264_v4l2m2m' in result.stdout:
+                    logger.info("Hardware encoder detected: h264_omx/h264_v4l2m2m")
+                    return True
+        except Exception as e:
+            logger.debug(f"Hardware encoder detection failed: {e}")
+        return False
+    
+    def _setup_udp_socket(self):
+        """Setup UDP socket for video streaming"""
+        try:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+            server_ip = self.server_url.split('://')[1].split(':')[0]
+            self.udp_target = (server_ip, self.udp_port)
+            logger.info(f"UDP socket setup for video streaming to {self.udp_target}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to setup UDP socket: {e}")
+            return False
+    
+    def _measure_network_latency(self):
+        """Measure network latency to server"""
+        try:
+            start_time = time.time()
+            # Simple ping via socket connection
+            server_ip = self.server_url.split('://')[1].split(':')[0]
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex((server_ip, 5001))
+            sock.close()
+            
+            if result == 0:
+                self.network_latency = (time.time() - start_time) * 1000  # ms
+                logger.debug(f"Network latency: {self.network_latency:.2f}ms")
+            else:
+                self.network_latency = 1000  # High latency fallback
+        except Exception as e:
+            logger.debug(f"Latency measurement failed: {e}")
+            self.network_latency = 500  # Default fallback
+    
+    def _adaptive_compression_params(self):
+        """Calculate adaptive compression parameters based on network conditions"""
+        # Measure latency periodically
+        current_time = time.time()
+        if current_time - self.last_ping_time > self.ping_interval:
+            self._measure_network_latency()
+            self.last_ping_time = current_time
+        
+        # Adjust parameters based on latency and queue utilization
+        queue_utilization = (self.send_queue.qsize() / self.send_queue.maxsize) * 100
+        
+        # Adaptive JPEG quality
+        if self.network_latency > 300 or queue_utilization > 80:
+            jpeg_quality = self.min_jpeg_quality
+            resize_factor = 0.3
+        elif self.network_latency > 150 or queue_utilization > 60:
+            jpeg_quality = self.base_jpeg_quality - 20
+            resize_factor = 0.4
+        elif self.network_latency > 50 or queue_utilization > 40:
+            jpeg_quality = self.base_jpeg_quality - 10
+            resize_factor = 0.5
+        else:
+            jpeg_quality = self.base_jpeg_quality
+            resize_factor = 0.6
+        
+        return max(jpeg_quality, self.min_jpeg_quality), resize_factor
+    
+    @lru_cache(maxsize=50)
+    def _get_cached_frame_hash(self, frame_data_hash):
+        """Get cached encoded frame by hash"""
+        return self.frame_cache.get(frame_data_hash)
+    
+    def _cache_encoded_frame(self, frame_hash, encoded_data):
+        """Cache encoded frame data"""
+        if len(self.frame_cache) > 100:  # Limit cache size
+            # Remove oldest entries
+            oldest_keys = list(self.frame_cache.keys())[:20]
+            for key in oldest_keys:
+                del self.frame_cache[key]
+        
+        self.frame_cache[frame_hash] = encoded_data
+    
+    def _hardware_encode_frame(self, frame, quality=65):
+        """Encode frame using hardware encoder if available"""
+        if not self.hardware_encoder_available:
+            return None
+        
+        try:
+            height, width = frame.shape[:2]
+            # Use ffmpeg with hardware encoder
+            cmd = [
+                'ffmpeg', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24',
+                '-s', f'{width}x{height}', '-r', '30', '-i', '-',
+                '-c:v', 'h264_omx', '-b:v', f'{quality*10}k',
+                '-preset', 'ultrafast', '-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov', '-'
+            ]
+            
+            process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate(input=frame.tobytes())
+            
+            if process.returncode == 0 and stdout:
+                return base64.b64encode(stdout).decode('utf-8')
+        except Exception as e:
+            logger.debug(f"Hardware encoding failed: {e}")
+        
+        return None
+    
+    def _send_udp_frame(self, frame_data):
+        """Send frame via UDP for low-latency video streaming"""
+        if not self.udp_socket:
+            return False
+        
+        try:
+            # Split large frames into chunks
+            chunk_size = 60000  # 60KB chunks
+            frame_bytes = frame_data.encode('utf-8')
+            total_chunks = (len(frame_bytes) + chunk_size - 1) // chunk_size
+            
+            for i in range(total_chunks):
+                start = i * chunk_size
+                end = min(start + chunk_size, len(frame_bytes))
+                chunk = frame_bytes[start:end]
+                
+                # Add header: frame_id(4) + chunk_id(4) + total_chunks(4) + data
+                header = struct.pack('!III', self.frame_id, i, total_chunks)
+                packet = header + chunk
+                
+                self.udp_socket.sendto(packet, self.udp_target)
+            
+            return True
+        except Exception as e:
+            logger.debug(f"UDP send failed: {e}")
+            return False
     
     def _attempt_reconnect(self):
         """Attempt to reconnect to server with exponential backoff"""
@@ -610,15 +949,22 @@ class PiClient:
         """Perform comprehensive system health check"""
         stats = self.get_queue_stats()
         
-        # Log health status
+        # Cache statistics
+        total_cache_requests = self.cache_hits + self.cache_misses
+        cache_hit_rate = (self.cache_hits / max(total_cache_requests, 1)) * 100
+        
+        # Log health status with enhanced metrics
         logger.info(f"Health Check - Frames: {stats['total_frames']}, "
                    f"Dropped: {stats['dropped_frames']} ({stats['drop_rate']:.1f}%), "
-                   f"Queue: {stats['queue_size']}/{stats['max_queue_size']} ({stats['queue_utilization']:.1f}%)")
+                   f"Queue: {stats['queue_size']}/{stats['max_queue_size']} ({stats['queue_utilization']:.1f}%), "
+                   f"Cache Hit Rate: {cache_hit_rate:.1f}%, "
+                   f"Network Latency: {self.network_latency:.1f}ms")
         
         if psutil:
             logger.info(f"System - CPU: {stats.get('cpu_usage', 'N/A')}%, "
                        f"Memory: {stats.get('memory_usage', 'N/A')}%, "
-                       f"Available: {stats.get('available_memory_mb', 'N/A')}MB")
+                       f"Available: {stats.get('available_memory_mb', 'N/A')}MB, "
+                       f"HW Encoder: {'Yes' if self.hardware_encoder_available else 'No'}")
         
         # Performance warnings
         if stats['drop_rate'] > 10:
@@ -630,9 +976,15 @@ class PiClient:
         if psutil and stats.get('memory_usage', 0) > 85:
             logger.warning(f"High memory usage: {stats['memory_usage']}%")
         
+        if self.network_latency > 300:
+            logger.warning(f"High network latency: {self.network_latency:.1f}ms - Using aggressive compression")
+        
         # Auto-optimization suggestions
         if stats['queue_overflows'] > 50:
             logger.info("Consider reducing frame rate or increasing queue size")
+        
+        if cache_hit_rate < 20 and total_cache_requests > 50:
+            logger.info("Low cache hit rate - Frames are highly variable")
         
         if not stats['thread_alive'] and self.use_threading:
             logger.error("Sender thread died! Attempting restart...")
