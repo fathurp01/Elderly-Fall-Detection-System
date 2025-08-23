@@ -376,11 +376,15 @@ class FallDetectionServer:
                 else:
                     logs = self.firebase_handler.get_all_logs(limit=500)
                 
+                # Get quota status information
+                quota_status = self.firebase_handler.get_quota_status() if self.firebase_handler else {}
+                
                 return jsonify({
                     'logs': logs,
                     'count': len(logs),
                     'optimized': hasattr(self.firebase_handler, 'get_all_logs_optimized'),
-                    'cached': self.cache_manager.initialized if self.cache_manager else False
+                    'cached': self.cache_manager.initialized if self.cache_manager else False,
+                    'quota_status': quota_status
                 })
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
@@ -410,6 +414,9 @@ class FallDetectionServer:
                 hourly_pattern = self._process_hourly_pattern(logs)
                 weekly_trend = self._process_weekly_trend(logs)
                 
+                # Get quota status information
+                quota_status = self.firebase_handler.get_quota_status() if self.firebase_handler else {}
+                
                 return jsonify({
                     'timeline': timeline_data,
                     'hourly_pattern': hourly_pattern,
@@ -417,7 +424,8 @@ class FallDetectionServer:
                     'total_logs': len(logs),
                     'fall_count': len([log for log in logs if log.get('type') == 'fall' or log.get('is_fall') == True]),
                     'optimized': hasattr(self.firebase_handler, 'get_all_logs_optimized'),
-                    'cached': self.cache_manager.initialized if self.cache_manager else False
+                    'cached': self.cache_manager.initialized if self.cache_manager else False,
+                    'quota_status': quota_status
                 })
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
@@ -606,10 +614,18 @@ class FallDetectionServer:
             # Broadcast to dashboard
             self.socketio.emit('detection_result', event_data)
             
-            # Emit system status
+            # Emit system status with proper camera status check
+            camera_online = len(self.bbox_buffer) > 0 and self.stats.get('last_detection')
+            if camera_online and self.stats.get('last_detection'):
+                try:
+                    last_detection_time = datetime.fromisoformat(self.stats['last_detection'].replace('Z', '+00:00'))
+                    camera_online = (datetime.now() - last_detection_time).total_seconds() < 10
+                except:
+                    camera_online = False
+            
             self.socketio.emit('system_status', {
-                'camera_online': True,
-                'model_loaded': True,
+                'camera_online': camera_online,
+                'model_loaded': self.lstm_model is not None,
                 'database_connected': self.firebase_handler.initialized if self.firebase_handler else False
             })
             
@@ -741,6 +757,9 @@ class FallDetectionServer:
         # Start background tasks
         self.start_background_tasks()
         
+        # Start periodic system status updates
+        self.start_system_status_monitor()
+        
         # Run the server
         self.socketio.run(self.app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
         
@@ -750,6 +769,36 @@ class FallDetectionServer:
         stats_thread = threading.Thread(target=self.update_stats_periodically)
         stats_thread.daemon = True
         stats_thread.start()
+    
+    def start_system_status_monitor(self):
+        """Start periodic system status monitoring"""
+        def status_monitor():
+            while True:
+                try:
+                    # Check camera status
+                    camera_online = len(self.bbox_buffer) > 0 and self.stats.get('last_detection')
+                    if camera_online and self.stats.get('last_detection'):
+                        try:
+                            last_detection_time = datetime.fromisoformat(self.stats['last_detection'].replace('Z', '+00:00'))
+                            camera_online = (datetime.now() - last_detection_time).total_seconds() < 10
+                        except:
+                            camera_online = False
+                    
+                    # Emit system status
+                    self.socketio.emit('system_status', {
+                        'camera_online': camera_online,
+                        'model_loaded': self.lstm_model is not None,
+                        'database_connected': self.firebase_handler.initialized if self.firebase_handler else False
+                    })
+                    
+                    time.sleep(5)  # Check every 5 seconds
+                except Exception as e:
+                    logger.error(f"System status monitor error: {e}")
+                    time.sleep(10)  # Wait 10 seconds before retrying
+        
+        # Start status monitor thread
+        status_thread = threading.Thread(target=status_monitor, daemon=True)
+        status_thread.start()
         
     def update_stats_periodically(self):
         """Update statistics periodically"""

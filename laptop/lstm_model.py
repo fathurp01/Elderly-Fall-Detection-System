@@ -73,171 +73,34 @@ class LSTMModel:
         self.EMA_ALPHA = 0.3
         self.PADDING_VALUE = -1.0
         
+        # Initialize scalers
+        self.scalers = None
+        
         # Load model if it exists
         self.load_model()
         
     def load_model(self):
         """
-        Load the trained LSTM model
+        Load pre-trained LSTM model and scaler
         """
         try:
             if os.path.exists(self.model_path) and TENSORFLOW_AVAILABLE:
-                # Try multiple loading strategies to handle compatibility issues
-                success = False
+                # Load the trained model
+                self.model = tf.keras.models.load_model(self.model_path, compile=False)
                 
-                # Strategy 1: Direct loading with tf.keras.models.load_model (handles ZIP format)
-                try:
-                    self.model = tf.keras.models.load_model(self.model_path, compile=False)
-                    self.model.compile(
-                        optimizer='adam',
-                        loss=focal_loss(),
-                        metrics=['accuracy']
-                    )
-                    logger.info(f"LSTM model loaded successfully (direct TF method) from {self.model_path}")
-                    self.is_loaded = True
-                    success = True
-                except Exception as e1:
-                    logger.warning(f"Direct TF loading failed: {e1}")
-                    
-                    # Strategy 1b: Try with custom objects for focal_loss
-                    try:
-                        custom_objects = {
-                            'focal_loss_fixed': focal_loss(),
-                            'focal_loss': focal_loss
-                        }
-                        self.model = tf.keras.models.load_model(self.model_path, custom_objects=custom_objects, compile=False)
-                        self.model.compile(
-                            optimizer='adam',
-                            loss=focal_loss(),
-                            metrics=['accuracy']
-                        )
-                        logger.info(f"LSTM model loaded successfully (TF with custom objects) from {self.model_path}")
-                        self.is_loaded = True
-                        success = True
-                    except Exception as e1b:
-                        logger.warning(f"TF loading with custom objects failed: {e1b}")
+                # Recompile the model with appropriate loss and metrics
+                self.model.compile(
+                    optimizer='adam',
+                    loss='binary_crossentropy',
+                    metrics=['accuracy', 'precision', 'recall']
+                )
                 
-                # Strategy 2: Load with custom objects (including focal loss)
-                if not success:
-                    try:
-                        import tensorflow.keras.utils as utils
-                        
-                        # Create custom deserialization function
-                        def custom_input_layer(**kwargs):
-                            # Remove problematic batch_shape parameter
-                            if 'batch_shape' in kwargs:
-                                shape = kwargs.pop('batch_shape')[1:]  # Remove batch dimension
-                                kwargs['input_shape'] = shape
-                            return keras.layers.InputLayer(**kwargs)
-                        
-                        custom_objects = {
-                            'InputLayer': custom_input_layer,
-                            'focal_loss_fixed': focal_loss(),
-                            'focal_loss': focal_loss
-                        }
-                        
-                        with utils.custom_object_scope(custom_objects):
-                            self.model = keras.models.load_model(self.model_path, compile=False)
-                            
-                        # Compile with focal loss (sesuai training)
-                        self.model.compile(
-                            optimizer='adam',
-                            loss=focal_loss(),
-                            metrics=['accuracy', 'precision', 'recall']
-                        )
-                        logger.info(f"LSTM model loaded successfully (custom objects with focal loss) from {self.model_path}")
-                        self.is_loaded = True
-                        success = True
-                    except Exception as e2:
-                        logger.warning(f"Custom objects loading failed: {e2}")
+                logger.info(f"LSTM model loaded successfully from {self.model_path}")
+                self.is_loaded = True
                 
-                # Strategy 3: Weights-only loading with reconstructed architecture
-                if not success:
-                    try:
-                        from tensorflow.keras.models import Sequential
-                        from tensorflow.keras.layers import LSTM, Dense, Dropout
-                        
-                        # Create a new model with the expected architecture
-                        model = Sequential([
-                            keras.layers.Input(shape=(self.sequence_length, self.input_features)),
-                            LSTM(128, return_sequences=True, dropout=0.2, recurrent_dropout=0.2),
-                            LSTM(64, dropout=0.2, recurrent_dropout=0.2),
-                            Dense(32, activation='relu'),
-                            Dropout(0.5),
-                            Dense(1, activation='sigmoid')
-                        ])
-                        
-                        # Load only the weights from the saved model
-                        import h5py
-                        with h5py.File(self.model_path, 'r') as f:
-                            if 'model_weights' in f:
-                                model.load_weights(self.model_path, by_name=True, skip_mismatch=True)
-                            else:
-                                # Try to extract weights from the full model
-                                temp_model = keras.models.load_model(self.model_path, compile=False)
-                                weights = temp_model.get_weights()
-                                model.set_weights(weights)
-                        
-                        model.compile(
-                            optimizer='adam',
-                            loss='binary_crossentropy',
-                            metrics=['accuracy']
-                        )
-                        
-                        self.model = model
-                        logger.info(f"LSTM model loaded successfully (weights-only) from {self.model_path}")
-                        self.is_loaded = True
-                        success = True
-                    except Exception as e3:
-                        logger.warning(f"Weights-only loading failed: {e3}")
+                # Load scaler (only once during initialization)
+                self._load_scaler()
                 
-                if not success:
-                    logger.warning("All loading strategies failed, creating new model architecture")
-                    # Create a fresh model with the correct architecture
-                    try:
-                        from tensorflow.keras.models import Sequential
-                        from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
-                        
-                        # Create model with same architecture as training (BiLSTM + Masking)
-                        from tensorflow.keras.layers import Masking, Bidirectional
-                        
-                        self.model = Sequential([
-                            # Masking layer untuk handle padding -1
-                            Masking(mask_value=self.PADDING_VALUE, input_shape=(self.sequence_length, self.input_features)),
-                            
-                            # BiLSTM layers untuk capture temporal patterns dari kedua arah
-                            Bidirectional(keras.layers.LSTM(64, return_sequences=True, dropout=0.3, recurrent_dropout=0.3)),
-                            keras.layers.Dropout(0.5),
-                            
-                            Bidirectional(keras.layers.LSTM(32, return_sequences=False, dropout=0.3, recurrent_dropout=0.3)),
-                            keras.layers.Dropout(0.3),
-                            
-                            # Dense layers dengan regularization (sama seperti training)
-                            keras.layers.Dense(64, activation='relu', kernel_regularizer=keras.regularizers.l2(0.001)),
-                            keras.layers.Dropout(0.5),
-                            
-                            keras.layers.Dense(32, activation='relu', kernel_regularizer=keras.regularizers.l2(0.001)),
-                            keras.layers.Dropout(0.3),
-                            
-                            keras.layers.Dense(1, activation='sigmoid')
-                        ])
-                        
-                        # Compile with binary_crossentropy untuk inference
-                        self.model.compile(
-                            optimizer='adam',
-                            loss='binary_crossentropy',
-                            metrics=['accuracy', 'precision', 'recall']
-                        )
-                        
-                        logger.info("Created new LSTM model with fresh architecture")
-                        logger.warning("Model weights are randomly initialized - consider retraining")
-                        self.is_loaded = True
-                        
-                    except Exception as e4:
-                        logger.error(f"Failed to create new model: {e4}")
-                        logger.error("Using placeholder model for demonstration")
-                        self.is_loaded = False
-                    
             else:
                 if not os.path.exists(self.model_path):
                     logger.warning(f"Model file not found: {self.model_path}")
@@ -247,8 +110,34 @@ class LSTMModel:
                 self.is_loaded = False
                 
         except Exception as e:
-            logger.error(f"Unexpected error in load_model: {e}")
+            logger.error(f"Error loading model: {e}")
+            logger.info("Using placeholder prediction method")
             self.is_loaded = False
+            
+    def _load_scaler(self):
+        """Load scaler from file with proper error handling"""
+        try:
+            import joblib
+            # Try multiple scaler file locations
+            scaler_paths = [
+                os.path.join(os.path.dirname(self.model_path), 'scaler2.pkl'),
+                os.path.join(os.path.dirname(self.model_path), 'fase_2c_feature_scalers.pkl'),
+                'scaler2.pkl',
+                'fase_2c_feature_scalers.pkl'
+            ]
+            
+            for scaler_path in scaler_paths:
+                if os.path.exists(scaler_path):
+                    self.scalers = joblib.load(scaler_path)
+                    logger.info(f"Scaler loaded successfully from {scaler_path}")
+                    return
+                    
+            logger.warning("No scaler file found in expected locations")
+            self.scalers = None
+            
+        except Exception as e:
+            logger.error(f"Error loading scaler: {e}")
+            self.scalers = None
             
     def extract_features(self, bbox_sequence, frame_width=640, frame_height=480):
         """
@@ -272,7 +161,10 @@ class LSTMModel:
         prev_vy = None
         
         for i, bbox in enumerate(bbox_sequence):
-            if len(bbox) == 4 and bbox != [0, 0, 0, 0]:  # Valid detection
+            # Convert bbox to numpy array for safe comparison
+            bbox_array = np.array(bbox) if not isinstance(bbox, np.ndarray) else bbox
+            # Check if bbox is valid (not all zeros and has 4 elements)
+            if len(bbox) == 4 and not np.array_equal(bbox_array, [0, 0, 0, 0]):  # Valid detection
                 x1, y1, x2, y2 = bbox
                 
                 # Normalized bbox coordinates (sesuai training)
@@ -342,6 +234,26 @@ class LSTMModel:
                 # No detection - padding with -1.0 for Masking layer compatibility
                 features_sequence.append([-1.0] * 13)
         
+        # Apply scaling if scaler is available
+        if hasattr(self, 'scalers') and self.scalers is not None:
+            try:
+                # Scale each feature dimension separately
+                scaled_features = []
+                for features in features_sequence:
+                    scaled_feature_row = []
+                    for feature_idx, feature_val in enumerate(features):
+                        if feature_idx in self.scalers and feature_val != self.PADDING_VALUE:
+                            scaler = self.scalers[feature_idx]
+                            scaled_val = scaler.transform([[feature_val]])[0][0]
+                            scaled_feature_row.append(scaled_val)
+                        else:
+                            scaled_feature_row.append(feature_val)
+                    scaled_features.append(scaled_feature_row)
+                features_sequence = scaled_features
+                logger.debug("Features scaled successfully")
+            except Exception as scale_error:
+                logger.warning(f"Error applying scaler: {scale_error}. Using unscaled features.")
+        
         return features_sequence
     
     def preprocess_sequence(self, bbox_sequence):
@@ -369,42 +281,26 @@ class LSTMModel:
                 padding = np.full((self.sequence_length - len(sequence), self.input_features), -1.0)
                 sequence = np.vstack([padding, sequence])
             
-            # Load and apply scaler if available (sesuai dengan training)
-            try:
-                import joblib
-                # Coba beberapa nama file scaler yang mungkin
-                scaler_paths = [
-                    os.path.join(os.path.dirname(self.model_path), 'fase_2c_feature_scalers.pkl'),
-                    os.path.join(os.path.dirname(self.model_path), 'scaler2.pkl'),
-                    'fase_2c_feature_scalers.pkl',
-                    'scaler2.pkl'
-                ]
-                
-                scalers = None
-                for scaler_path in scaler_paths:
-                    if os.path.exists(scaler_path):
-                        scalers = joblib.load(scaler_path)
-                        logger.info(f"Loaded scalers from: {scaler_path}")
-                        break
-                
-                if scalers is not None:
+            # Apply scaler if available (use the one loaded in constructor)
+            if hasattr(self, 'scalers') and self.scalers is not None:
+                try:
                     # Apply scaling sesuai dengan training (skip presence feature index 7 dan padding values)
                     for feature_idx in range(self.input_features):
                         if feature_idx == 7:  # Skip presence feature (binary)
                             continue
                             
-                        if feature_idx in scalers:
+                        if feature_idx in self.scalers:
                             # Create mask for non-padding values
                             mask = sequence[:, feature_idx] != self.PADDING_VALUE
                             if np.any(mask):
                                 # Only scale non-padding values
                                 non_padding_values = sequence[:, feature_idx][mask]
-                                scaled_values = scalers[feature_idx].transform(non_padding_values.reshape(-1, 1)).flatten()
+                                scaled_values = self.scalers[feature_idx].transform(non_padding_values.reshape(-1, 1)).flatten()
                                 sequence[:, feature_idx][mask] = scaled_values
-                else:
-                    logger.warning(f"Scaler files not found in any of the expected locations")
-            except Exception as e:
-                logger.warning(f"Could not apply scaling: {e}")
+                except Exception as e:
+                    logger.warning(f"Could not apply scaling: {e}")
+            else:
+                logger.warning("No scalers available for preprocessing")
                 
             # Add batch dimension for model input
             sequence = sequence.reshape(1, self.sequence_length, self.input_features)
@@ -544,13 +440,16 @@ class LSTMModel:
                 prediction = self.model.predict(processed_sequence, verbose=0)
                 confidence = float(prediction[0][0])  # Binary classification output
                 
-                # Threshold for fall detection (0.5 is typical for binary classification)
+                # Apply confidence threshold (sesuai dengan training)
+                # Model output is probability of "Jatuh" (fall)
                 if confidence > 0.5:
                     label = "Jatuh"
                     confidence_score = confidence
                 else:
                     label = "Tidak Jatuh"
-                    confidence_score = 1 - confidence
+                    confidence_score = 1 - confidence  # Confidence for "Tidak Jatuh"
+                
+                logger.debug(f"LSTM prediction: {label} with confidence {confidence_score:.3f}")
                 
                 return {
                     'label': label,
@@ -603,22 +502,18 @@ class LSTMModel:
             avg_movement = np.mean(movements) if movements else 0
             avg_height_change = np.mean(height_changes) if height_changes else 0
             
-            # Simulate fall detection based on movement patterns
+            # Calculate fall probability based on movement patterns
             # High movement + significant height change might indicate a fall
             fall_score = (avg_movement * 0.6 + avg_height_change * 0.4) / 100
-            
-            # Add some randomness for demonstration
-            import random
-            fall_score += random.uniform(-0.2, 0.2)
             fall_score = max(0, min(1, fall_score))  # Clamp to [0,1]
             
-            # Add more randomness to generate both fall and normal activities
-            random_factor = random.uniform(0, 1)
-            if random_factor < 0.15:  # 15% chance of fall detection
-                fall_score = random.uniform(0.7, 0.95)  # High confidence fall
-            elif random_factor < 0.85:  # 70% chance of normal activity
-                fall_score = random.uniform(0.1, 0.4)  # Low confidence (normal)
-            # else: keep original fall_score (15% chance)
+            # Use deterministic thresholds for more consistent predictions
+            # Most activities should be classified as normal unless clear fall patterns
+            if avg_movement > 50 and avg_height_change > 30:
+                fall_score = min(0.8, fall_score + 0.3)  # Likely fall
+            elif avg_movement < 20 and avg_height_change < 10:
+                fall_score = max(0.1, fall_score - 0.2)  # Likely normal
+            # else: keep calculated fall_score
             
             # Determine label based on threshold
             if fall_score > 0.5:

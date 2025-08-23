@@ -31,6 +31,8 @@ class FirebaseHandler:
         self.db = None
         self.bucket = None
         self.initialized = False
+        self.quota_exceeded = False
+        self.last_quota_check = None
         
         if not FIREBASE_AVAILABLE:
             logging.error("Firebase Admin SDK not available")
@@ -75,6 +77,50 @@ class FirebaseHandler:
             logging.error(f"Firebase initialization traceback: {traceback.format_exc()}")
             self.initialized = False
     
+    def _check_firebase_quota(self) -> bool:
+        """Check if Firebase quota is available by performing a minimal query"""
+        try:
+            # Only check quota every 5 minutes to avoid excessive calls
+            now = datetime.now()
+            if (self.last_quota_check and 
+                (now - self.last_quota_check).total_seconds() < 300):
+                return not self.quota_exceeded
+            
+            if not self.db:
+                return False
+            
+            # Perform minimal query to test quota
+            test_query = self.db.collection('fall_detections').limit(1).stream()
+            list(test_query)  # Force execution
+            
+            # If we reach here, quota is available
+            self.quota_exceeded = False
+            self.last_quota_check = now
+            logging.debug("Firebase quota check: OK")
+            return True
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            # Check for quota-related errors
+            if any(keyword in error_msg for keyword in ['quota', 'exceeded', 'limit', 'resource_exhausted']):
+                self.quota_exceeded = True
+                self.last_quota_check = now
+                logging.warning(f"Firebase quota exceeded: {e}")
+                return False
+            else:
+                # Other errors don't necessarily mean quota exceeded
+                logging.error(f"Firebase quota check failed: {e}")
+                return not self.quota_exceeded  # Return previous state
+    
+    def get_quota_status(self) -> Dict:
+        """Get current Firebase quota status information"""
+        return {
+            'quota_exceeded': self.quota_exceeded,
+            'last_check': self.last_quota_check.isoformat() if self.last_quota_check else None,
+            'firebase_initialized': self.initialized,
+            'using_mock_data': self.quota_exceeded or not self.initialized
+        }
+     
     def save_detection(self, detection_data: Dict) -> Optional[str]:
         """Save fall detection event to Firestore"""
         if not self.initialized:
@@ -123,13 +169,16 @@ class FirebaseHandler:
             return []
     
     @cached_firebase_query(timeout=300, key_prefix="recent_detections")
-    def get_recent_detections_optimized(self, limit: int = 10, hours: int = 24) -> List[Dict]:
-        """Get recent fall detections with time filtering and caching"""
-        if not self.initialized:
-            return []
-            
+    def get_recent_detections_optimized(self, hours: int = 24, limit: int = 100) -> List[Dict]:
+        """Get recent detections with caching and time filtering"""
         try:
             if not self.db:
+                logging.info("Firebase not initialized, returning empty recent detections")
+                return []
+            
+            # Check Firebase quota before attempting query
+            if not self._check_firebase_quota():
+                logging.warning("Firebase quota exceeded, returning empty recent detections")
                 return []
             
             # Calculate time threshold
@@ -149,19 +198,31 @@ class FirebaseHandler:
                 data['id'] = doc.id
                 detections.append(data)
             
-            logging.info(f"Retrieved {len(detections)} recent detections (last {hours}h, limit {limit})")
+            logging.info(f"Retrieved {len(detections)} recent detections from Firebase (last {hours}h, limit {limit})")
             return detections
             
         except Exception as e:
-            logging.error(f"Failed to get recent detections optimized: {e}")
-            return []
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['quota', 'exceeded', 'limit', 'resource_exhausted']):
+                self.quota_exceeded = True
+                self.last_quota_check = datetime.now()
+                logging.warning(f"Firebase quota exceeded during recent detections query: {e}")
+                return []
+            else:
+                logging.error(f"Failed to get recent detections optimized: {e}")
+                return []
     
     def get_all_logs(self, limit: int = 1000) -> List[Dict]:
         """Get all detection logs for the logs page"""
         try:
             if not self.db:
-                # Return mock data if Firebase is not configured
-                return self._get_mock_logs()
+                logging.info("Firebase not initialized, using mock data")
+                return self._get_mock_logs(mock_reason="firebase_not_initialized")
+            
+            # Check Firebase quota before attempting query
+            if not self._check_firebase_quota():
+                logging.warning("Firebase quota exceeded, using mock data")
+                return self._get_mock_logs(mock_reason="quota_exceeded")
             
             docs = self.db.collection('fall_detections').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit).stream()
             logs = []
@@ -169,18 +230,33 @@ class FirebaseHandler:
                 data = doc.to_dict()
                 data['id'] = doc.id
                 logs.append(data)
+            
+            logging.info(f"Retrieved {len(logs)} logs from Firebase (limit {limit})")
             return logs
+            
         except Exception as e:
-            logging.error(f"Error getting logs: {e}")
-            # Return mock data on error
-            return self._get_mock_logs()
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['quota', 'exceeded', 'limit', 'resource_exhausted']):
+                self.quota_exceeded = True
+                self.last_quota_check = datetime.now()
+                logging.warning(f"Firebase quota exceeded during query: {e}")
+                return self._get_mock_logs(mock_reason="quota_exceeded")
+            else:
+                logging.error(f"Error getting logs: {e}")
+                return self._get_mock_logs(mock_reason="firebase_error")
     
     @cached_firebase_query(timeout=600, key_prefix="all_logs")
     def get_all_logs_optimized(self, limit: int = 500, days: int = 30) -> List[Dict]:
         """Get detection logs with time filtering and optimized query"""
         try:
             if not self.db:
-                return self._get_mock_logs()
+                logging.info("Firebase not initialized, using mock data")
+                return self._get_mock_logs(mock_reason="firebase_not_initialized")
+            
+            # Check Firebase quota before attempting query
+            if not self._check_firebase_quota():
+                logging.warning("Firebase quota exceeded, using mock data")
+                return self._get_mock_logs(mock_reason="quota_exceeded")
             
             # Calculate time threshold for better performance
             time_threshold = datetime.now() - timedelta(days=days)
@@ -199,22 +275,50 @@ class FirebaseHandler:
                 data['id'] = doc.id
                 logs.append(data)
             
-            logging.info(f"Retrieved {len(logs)} logs (last {days} days, limit {limit})")
+            logging.info(f"Retrieved {len(logs)} logs from Firebase (last {days} days, limit {limit})")
             return logs
             
         except Exception as e:
-            logging.error(f"Error getting optimized logs: {e}")
-            return self._get_mock_logs()
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['quota', 'exceeded', 'limit', 'resource_exhausted']):
+                self.quota_exceeded = True
+                self.last_quota_check = datetime.now()
+                logging.warning(f"Firebase quota exceeded during query: {e}")
+                return self._get_mock_logs(mock_reason="quota_exceeded")
+            else:
+                logging.error(f"Error getting optimized logs: {e}")
+                return self._get_mock_logs(mock_reason="firebase_error")
     
-    def _get_mock_logs(self) -> List[Dict]:
+    def _get_mock_logs(self, mock_reason: str = "unknown") -> List[Dict]:
         """Generate mock logs for demonstration when Firebase is not available"""
         import random
         from datetime import timedelta
         
+        # Add status information based on reason
+        status_messages = {
+            "quota_exceeded": "⚠️ Firebase quota exceeded - Showing demo data",
+            "firebase_not_initialized": "ℹ️ Firebase not configured - Showing demo data", 
+            "firebase_error": "❌ Firebase connection error - Showing demo data",
+            "unknown": "📊 Showing demo data"
+        }
+        
         mock_logs = []
         base_time = datetime.now()
         
-        for i in range(50):
+        # Add status indicator as first "log" entry
+        mock_logs.append({
+            'id': 'status_indicator',
+            'timestamp': base_time.isoformat(),
+            'confidence': 0.0,
+            'type': 'status',
+            'label': status_messages.get(mock_reason, status_messages["unknown"]),
+            'is_fall': False,
+            'details': f'Status: Using mock data due to {mock_reason.replace("_", " ")}',
+            'screenshot_url': None,
+            'mock_reason': mock_reason
+        })
+        
+        for i in range(49):  # Reduced to 49 to account for status indicator
             # Generate random timestamp within last 30 days
             random_days = random.randint(0, 30)
             random_hours = random.randint(0, 23)

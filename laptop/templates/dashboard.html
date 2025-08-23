@@ -848,9 +848,20 @@
             width: 10px;
             height: 10px;
             border-radius: 50%;
+            background: #e74c3c;
+            box-shadow: 0 0 15px rgba(231, 76, 60, 0.6), 0 0 30px rgba(231, 76, 60, 0.3);
+            animation: pulse 2s infinite;
+            transition: all 0.3s ease;
+        }
+        
+        .camera-status-indicator.online {
             background: #2ed573;
             box-shadow: 0 0 15px rgba(46, 213, 115, 0.6), 0 0 30px rgba(46, 213, 115, 0.3);
-            animation: pulse 2s infinite;
+        }
+        
+        .camera-status-indicator.offline {
+            background: #e74c3c;
+            box-shadow: 0 0 15px rgba(231, 76, 60, 0.6), 0 0 30px rgba(231, 76, 60, 0.3);
         }
 
         @keyframes pulse {
@@ -1697,14 +1708,17 @@
                 initializeSystemLog();
                 loadInitialStats();
                 
+                // Initialize camera status indicator to offline (red) by default
+                updateCameraStatusIndicator(false);
+                
                 // Start timers
                 updateUptime();
                 setInterval(updateUptime, 1000);
                 
-                // Initialize demo mode if no real connections
+                // Real-time mode only - no demo mode
                 if (!socket) {
-                    console.log('Starting demo mode...');
-                    startDemoMode();
+                    console.log('Waiting for real server connection...');
+                    // No demo mode - system waits for real data
                 }
                 
                 // Auto-refresh Firebase data every 15 seconds for real-time updates
@@ -1743,7 +1757,7 @@
 
             socket.on('video_frame', function(data) {
                 updateVideoFeed(data.frame);
-                updateSystemHealth('cameraStatus', true);
+                // Camera status will be handled by system_status event
             });
 
             socket.on('detection_result', function(data) {
@@ -1754,6 +1768,8 @@
                 updateSystemHealth('cameraStatus', data.camera_online);
                 updateSystemHealth('modelStatus', data.model_loaded);
                 updateSystemHealth('databaseStatus', data.database_connected);
+                // Firebase status should match database status since they use the same Firebase instance
+                updateSystemHealth('firebaseStatus', data.database_connected);
             });
         }
 
@@ -1784,12 +1800,32 @@
                 element.className = 'status-badge status-offline';
                 element.textContent = 'Offline';
             }
+            
+            // Update camera status indicator when camera status changes
+            if (elementId === 'cameraStatus') {
+                updateCameraStatusIndicator(isOnline);
+            }
+        }
+        
+        function updateCameraStatusIndicator(isOnline) {
+            const indicator = document.querySelector('.camera-status-indicator');
+            if (!indicator) return;
+            
+            if (isOnline) {
+                indicator.classList.remove('offline');
+                indicator.classList.add('online');
+            } else {
+                indicator.classList.remove('online');
+                indicator.classList.add('offline');
+            }
         }
 
         function updateVideoFeed(frameData) {
             const videoFeed = document.getElementById('videoFeed');
             if (videoFeed && frameData) {
                 videoFeed.src = 'data:image/jpeg;base64,' + frameData;
+                // Update camera status indicator to green when receiving video frames
+                updateCameraStatusIndicator(true);
             }
         }
 
@@ -1890,14 +1926,16 @@
         }
 
         function loadInitialStats() {
-            // Mock initial stats for demo
+            // Initialize with zero stats - will be updated from real server data
             stats = {
-                totalFalls: Math.floor(Math.random() * 10),
-                todayFalls: Math.floor(Math.random() * 3),
+                totalFalls: 0,
+                todayFalls: 0,
                 totalFrames: 0
             };
             
             updateStatsDisplay();
+            // Load real stats from Firebase
+            loadFirebaseData();
         }
         
         // System Log Functions
@@ -1952,10 +1990,11 @@
                 db = firebase.firestore();
                 console.log('Firebase and Firestore initialized successfully');
                 firebaseInitialized = true;
-                updateSystemHealth('firebaseStatus', true);
+                // Don't update firebaseStatus here - it will be managed by server system_status events
             } catch (error) {
                 console.error('Firebase initialization failed:', error);
                 firebaseInitialized = false;
+                // Only update to false if initialization fails, server will handle true status
                 updateSystemHealth('firebaseStatus', false);
                 db = null;
             }
@@ -1963,23 +2002,20 @@
         
         // System Health Monitoring
         function initializeSystemMonitoring() {
-            // Mock system health for demo
-            updateSystemHealth('cameraStatus', true);
-            updateSystemHealth('modelStatus', true);
-            updateSystemHealth('databaseStatus', true);
-            updateSystemHealth('piClientStatus', false); // Keep warning status
-            updateSystemHealth('firebaseStatus', true);
+            // Initialize status to offline by default - will be updated by real server data
+            updateSystemHealth('cameraStatus', false);
+            updateSystemHealth('modelStatus', false);
+            updateSystemHealth('databaseStatus', false);
+            updateSystemHealth('piClientStatus', false);
+            updateSystemHealth('firebaseStatus', false);
             
-            // Simulate periodic health checks
-            setInterval(() => {
-                // Randomly simulate some status changes for demo
-                if (Math.random() < 0.1) {
-                    const statuses = ['cameraStatus', 'modelStatus', 'databaseStatus'];
-                    const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-                    const randomHealth = Math.random() > 0.2; // 80% chance of being online
-                    updateSystemHealth(randomStatus, randomHealth);
-                }
-            }, 10000);
+            // Only simulate status changes if no real socket connection is available
+            if (!socket || !socket.connected) {
+                console.log('No real connection - enabling demo status simulation');
+                // Simulate periodic health checks for demo mode only
+                // System health updates come from real server events
+                // No simulation needed - status updated via WebSocket
+            }
         }
         
         // Notification System
@@ -2060,7 +2096,7 @@
             
             // Load from Firebase
             if (typeof db !== 'undefined' && db) {
-                const fallsRef = db.collection('falls').orderBy('timestamp', 'desc').limit(5);
+                const fallsRef = db.collection('fall_detections').orderBy('timestamp', 'desc').limit(10);
                 
                 fallsRef.get().then((querySnapshot) => {
                     const notifications = [];
@@ -2070,12 +2106,12 @@
                         const timestamp = data.timestamp ? data.timestamp.toDate() : new Date();
                         
                         // Only show fall detected notifications
-                        if (data.prediction === 'Fall Detected') {
+                        if (data.is_fall === true || data.label === 'Jatuh' || data.prediction === 'Fall Detected') {
                             notifications.push({
                                 id: doc.id,
                                 type: 'fall-alert',
                                 message: 'Fall Detected!',
-                                details: `Confidence: ${(data.confidence * 100).toFixed(1)}% | Camera: 0`,
+                                details: `Confidence: ${(data.confidence * 100).toFixed(1)}% | Location: ${data.location || 'Camera 0'}`,
                                 timestamp: timestamp,
                                 read: false
                             });
@@ -2177,15 +2213,22 @@
         function loadNotificationCount() {
             // Load unread notification count from Firebase
             if (typeof db !== 'undefined' && db) {
-                const fallsRef = db.collection('falls').orderBy('timestamp', 'desc').limit(10);
+                const fallsRef = db.collection('fall_detections').orderBy('timestamp', 'desc').limit(50);
                 
                 fallsRef.get().then((querySnapshot) => {
                     const recentFalls = querySnapshot.docs.filter(doc => {
                         const data = doc.data();
-                        const timestamp = data.timestamp ? data.timestamp.toDate() : new Date();
+                        let timestamp;
+                        if (data.timestamp && typeof data.timestamp.toDate === 'function') {
+                            timestamp = data.timestamp.toDate();
+                        } else if (data.timestamp) {
+                            timestamp = new Date(data.timestamp);
+                        } else {
+                            timestamp = new Date();
+                        }
                         const hoursSinceDetection = (new Date() - timestamp) / (1000 * 60 * 60);
                         // Only count fall detected notifications from last 24 hours
-                        return data.prediction === 'Fall Detected' && hoursSinceDetection <= 24;
+                        return (data.is_fall === true || data.label === 'Jatuh' || data.prediction === 'Fall Detected') && hoursSinceDetection <= 24;
                     });
                     
                     updateNotificationBadge(recentFalls.length);
@@ -2194,9 +2237,8 @@
                     updateNotificationBadge(0);
                 });
             } else {
-                // Demo mode - show random count
-                const demoCount = Math.floor(Math.random() * 3);
-                updateNotificationBadge(demoCount);
+                // No demo mode - show zero count until real data loads
+                updateNotificationBadge(0);
             }
         }
         
@@ -2223,9 +2265,9 @@
             
             notifications.unshift(notification);
             
-            // Keep only last 50 notifications
-            if (notifications.length > 50) {
-                notifications = notifications.slice(0, 50);
+            // Keep only last 10 notifications as requested
+            if (notifications.length > 10) {
+                notifications = notifications.slice(0, 10);
             }
             
             updateNotificationList();
@@ -2234,6 +2276,12 @@
             // Show fall alert popup if it's a fall detection
             if (type === 'fall') {
                 showFallAlert(timestamp);
+            }
+            
+            // Auto-refresh notification history if dropdown is open
+            const dropdown = document.getElementById('notificationDropdown');
+            if (dropdown && dropdown.classList.contains('show')) {
+                loadNotificationHistory();
             }
         }
         
@@ -2315,77 +2363,47 @@
             }
         }
         
-        // Demo Mode Functions
-        function startDemoMode() {
-            console.log('Starting demo mode with simulated data...');
+        // Show quota exceeded notification
+        function showQuotaNotification(quotaStatus) {
+            // Remove existing quota notification if any
+            const existingNotification = document.getElementById('quota-notification');
+            if (existingNotification) {
+                existingNotification.remove();
+            }
             
-            // Simulate periodic detection results
-            setInterval(() => {
-                simulateDetection();
-            }, 15000); // Every 15 seconds
+            const notification = document.createElement('div');
+            notification.id = 'quota-notification';
+            notification.className = 'alert alert-warning alert-dismissible fade show position-fixed';
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
             
-            // Simulate occasional fall detection
-            setInterval(() => {
-                if (Math.random() < 0.3) { // 30% chance
-                    simulateFallDetection();
-                }
-            }, 45000); // Every 45 seconds
+            let message = 'Using mock data. ';
+             if (quotaStatus.quota_exceeded) {
+                 message += 'Firebase quota exceeded. ';
+             } else if (!quotaStatus.firebase_initialized) {
+                 message += 'Firebase not initialized. ';
+             }
+             message += 'Real data will resume when Firebase is available.';
+             
+             notification.innerHTML = `
+                 <strong><i class="fas fa-exclamation-triangle"></i> Data Notice:</strong> ${message}
+                <button type="button" class="close" data-dismiss="alert" onclick="hideQuotaNotification()">
+                    <span>&times;</span>
+                </button>
+            `;
             
-            // Simulate comprehensive system log entries
-            setInterval(() => {
-                const messages = [
-                    'Camera feed status: Active',
-                    'LSTM model inference completed',
-                    'Firebase connection verified',
-                    'System health check passed',
-                    'Memory usage: Normal',
-                    'CPU utilization: Optimal',
-                    'Network connectivity: Stable',
-                    'Database synchronization completed',
-                    'Model confidence threshold maintained',
-                    'Video stream quality: Good',
-                    'Pi Client heartbeat received',
-                    'Fall detection algorithm active',
-                    'Data preprocessing completed',
-                    'Feature extraction successful'
-                ];
-                const randomMessage = messages[Math.floor(Math.random() * messages.length)];
-                addSystemLogEntry('monitoring', randomMessage);
-            }, 6000); // Every 6 seconds for more frequent updates
+            document.body.appendChild(notification);
         }
         
-        function simulateDetection() {
-            const mockData = {
-                label: 'Normal',
-                confidence: 0.85 + Math.random() * 0.1,
-                frame: null
-            };
-            
-            // Don't add normal detections to log, but still process for internal tracking
-            // addDetectionLog(mockData, false); // Commented out to hide normal activity
-            
-            // Add system activity logs instead
-            const systemMessages = [
-                'Frame analysis completed - Normal activity detected',
-                'YOLO model processed frame successfully',
-                'LSTM sequence analysis completed',
-                'Person tracking updated',
-                'Motion analysis completed'
-            ];
-            const randomMessage = systemMessages[Math.floor(Math.random() * systemMessages.length)];
-            addSystemLogEntry('monitoring', randomMessage);
+        // Hide quota notification
+        function hideQuotaNotification() {
+            const notification = document.getElementById('quota-notification');
+            if (notification) {
+                notification.remove();
+            }
         }
         
-        function simulateFallDetection() {
-            const mockData = {
-                label: 'Fall',
-                confidence: 0.9 + Math.random() * 0.08,
-                frame: null
-            };
-            
-            handleDetectionResult(mockData);
-            console.log('Simulated fall detection');
-        }
+        // Real-time detection handling - no demo mode
+        // All detection data comes from real server events via WebSocket
         
         // Test functions for development
         function testNotification() {
@@ -2408,6 +2426,14 @@
                     
                     // Extract logs array from response object
                     const logs = data.logs || [];
+                    const quotaStatus = data.quota_status || {};
+                    
+                    // Check if using mock data due to quota exceeded
+                    if (quotaStatus.using_mock_data) {
+                        showQuotaNotification(quotaStatus);
+                    } else {
+                        hideQuotaNotification();
+                    }
                     
                     // Update statistics from Firebase data
                     const fallLogs = logs.filter(log => log.type === 'fall' || log.is_fall === true);
@@ -2426,7 +2452,7 @@
                     updateStatsDisplay();
                     
                     // Update recent detections in system log (only show new entries)
-                    const recentLogs = data.slice(0, 3); // Get 3 most recent
+                    const recentLogs = logs.slice(0, 3); // Get 3 most recent
                     const currentTime = new Date().getTime();
                     
                     recentLogs.forEach(log => {
@@ -2494,8 +2520,8 @@
                      console.warn('Error loading timeline stats:', error);
                      // Hide loading indicator
                      showChartLoadingIndicator(false);
-                     // Create charts with demo data if API fails
-                     createDemoCharts();
+                     // Create empty charts if API fails - will be populated with real data
+                    createEmptyCharts();
                  });
          }
          
@@ -2726,43 +2752,45 @@
              });
          }
          
-         function createDemoCharts() {
-             // Create demo data if API fails
-             const demoTimelineData = [
-                 {day: 'Mon', falls: 2, normal: 45},
-                 {day: 'Tue', falls: 1, normal: 38},
-                 {day: 'Wed', falls: 3, normal: 42},
-                 {day: 'Thu', falls: 0, normal: 35},
-                 {day: 'Fri', falls: 1, normal: 40},
-                 {day: 'Sat', falls: 2, normal: 30},
-                 {day: 'Sun', falls: 1, normal: 25}
+         function createEmptyCharts() {
+             // Create empty charts - will be populated with real data from Firebase
+             const emptyTimelineData = [
+                 {day: 'Mon', falls: 0, normal: 0},
+                 {day: 'Tue', falls: 0, normal: 0},
+                 {day: 'Wed', falls: 0, normal: 0},
+                 {day: 'Thu', falls: 0, normal: 0},
+                 {day: 'Fri', falls: 0, normal: 0},
+                 {day: 'Sat', falls: 0, normal: 0},
+                 {day: 'Sun', falls: 0, normal: 0}
              ];
              
-             const demoHourlyData = Array.from({length: 24}, (_, i) => ({
+             const emptyHourlyData = Array.from({length: 24}, (_, i) => ({
                  time: `${i.toString().padStart(2, '0')}:00`,
-                 falls: Math.floor(Math.random() * 3),
-                 normal: Math.floor(Math.random() * 10) + 5
+                 falls: 0,
+                 normal: 0
              }));
              
-             const demoWeeklyData = [
-                 {week_start: '12/01', falls: 8, normal: 180},
-                 {week_start: '12/08', falls: 5, normal: 165},
-                 {week_start: '12/15', falls: 10, normal: 190},
-                 {week_start: '12/22', falls: 3, normal: 140}
+             const emptyWeeklyData = [
+                 {week_start: 'Week 1', falls: 0, normal: 0},
+                 {week_start: 'Week 2', falls: 0, normal: 0},
+                 {week_start: 'Week 3', falls: 0, normal: 0},
+                 {week_start: 'Week 4', falls: 0, normal: 0}
              ];
              
-             createTimelineChart(demoTimelineData);
-             createHourlyPatternChart(demoHourlyData);
-             createWeeklyTrendChart(demoWeeklyData);
+             createTimelineChart(emptyTimelineData);
+             createHourlyPatternChart(emptyHourlyData);
+             createWeeklyTrendChart(emptyWeeklyData);
+             
+             // Load real data from Firebase to populate charts
+             loadFirebaseData();
          }
         
         // Expose test functions globally for console testing
         window.testNotification = testNotification;
         window.testNormalNotification = testNormalNotification;
-        window.simulateFallDetection = simulateFallDetection;
         window.loadFirebaseData = loadFirebaseData;
         
-        console.log('Script loading complete. Demo functions available: testNotification(), testNormalNotification(), simulateFallDetection(), loadFirebaseData()');
+        console.log('Script loading complete. Functions available: testNotification(), testNormalNotification(), loadFirebaseData()');
     </script>
 </body>
 </html>

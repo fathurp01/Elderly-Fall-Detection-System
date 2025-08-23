@@ -5,10 +5,10 @@
 opencv-python==4.8.1.78
 numpy==1.24.3
 
-# YOLOv8 and Deep Learning
-ultralytics==8.0.196
-torch==1.13.1
-torchvision==0.14.1
+# YOLOv8 and Deep Learning - Updated for Python 3.11 compatibility
+ultralytics==8.0.200
+torch==2.1.0
+torchvision==0.16.0
 
 # WebSocket Communication
 python-socketio[client]==5.8.0
@@ -20,10 +20,13 @@ psutil==5.9.5
 
 # Logging and Configuration
 pyyaml==6.0.1
+python-dotenv==1.0.0
 
-# Optional: For PiCamera support (uncomment if using PiCamera)
-picamera2==0.3.12
+# Optional: For PiCamera support (install manually on Raspberry Pi only)
+# picamera2==0.3.12
 # libcamera harus install via apt, bukan pip
+# Install PiCamera2 on Raspberry Pi with:
+# sudo apt update && sudo apt install -y python3-picamera2
 
 # Development and Testing
 pytest==7.4.0

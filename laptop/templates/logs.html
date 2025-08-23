@@ -8,6 +8,7 @@
     
     <!-- External Libraries -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <style>
         @import url("https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css");
@@ -29,11 +30,12 @@
         }
 
         body {
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 25%, #16213e 50%, #0f3460 75%, #0a0a0a 100%);
-            font-family: "Plus Jakarta Sans", Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 25%, #16213e 50%, #0f3460 75%, #0a0a0a 100%) !important;
+            font-family: "Plus Jakarta Sans", Helvetica, Arial, sans-serif !important;
             min-height: 100vh;
             overflow-x: hidden;
             position: relative;
+            color: white !important;
         }
         
         body::before {
@@ -270,6 +272,44 @@
             flex-direction: column;
             gap: 0px;
         }
+        
+        @media (max-width: 768px) {
+            .container {
+                margin-left: 20px;
+                margin-right: 10px;
+                padding: 2px 10px;
+            }
+            
+            .header {
+                padding: 10px 15px;
+            }
+            
+            .main-title {
+                font-size: 24px;
+            }
+            
+            .nav-buttons {
+                gap: 8px;
+            }
+            
+            .nav-btn, .notification-icon {
+                width: 45px;
+                height: 45px;
+                font-size: 16px;
+            }
+            
+            .log-entry {
+                grid-template-columns: auto 1fr;
+                gap: 15px;
+                padding: 12px 15px;
+            }
+            
+            .log-actions {
+                grid-column: 1 / -1;
+                justify-content: center;
+                margin-top: 10px;
+            }
+        }
 
         /* Filter Controls */
         .filter-controls {
@@ -279,14 +319,40 @@
             border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 20px;
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-            padding: 20px;
-            margin: 15px 20px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            align-items: center;
+            padding: 25px;
+            margin: 2px 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr auto;
+            gap: 20px;
+            align-items: end;
             position: relative;
             overflow: hidden;
+        }
+        
+        @media (max-width: 1200px) {
+            .filter-controls {
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 15px;
+            }
+            
+            .clear-btn {
+                grid-column: 1 / -1;
+                justify-self: center;
+                margin-top: 10px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .filter-controls {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .clear-btn {
+                grid-column: 1;
+                justify-self: stretch;
+                margin-top: 10px;
+            }
         }
 
         .filter-controls::before {
@@ -298,47 +364,127 @@
             height: 1px;
             background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
         }
+        
+        .filter-status {
+            grid-column: 1 / -1;
+            padding: 12px 16px;
+            background: rgba(46, 213, 115, 0.1);
+            border: 1px solid rgba(46, 213, 115, 0.3);
+            border-radius: 12px;
+            color: #2ed573;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-align: center;
+            margin-top: 10px;
+            opacity: 0;
+            visibility: hidden;
+            height: 0;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .filter-status.active {
+            opacity: 1;
+            visibility: visible;
+            height: auto;
+            padding: 12px 16px;
+            margin-top: 10px;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
 
         .filter-group {
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 8px;
+            min-width: 0;
+            position: relative;
+        }
+        
+        .filter-indicator {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 16px;
+            height: 16px;
+            background: linear-gradient(135deg, #2ed573 0%, #1dd1a1 100%);
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            animation: filterPulse 2s infinite;
+            display: none;
+            z-index: 10;
+        }
+        
+        .filter-indicator.active {
+            display: block;
+        }
+        
+        @keyframes filterPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7); }
+            50% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(46, 213, 115, 0); }
         }
 
         .filter-label {
             font-family: "Plus Jakarta Sans", Helvetica;
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 0.9rem;
-            font-weight: 500;
-            letter-spacing: 0.3px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 2px;
         }
 
         .filter-input {
-            padding: 10px 15px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.06);
+            padding: 12px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.08) !important;
             backdrop-filter: blur(20px);
-            color: white;
-            font-size: 0.9rem;
+            color: white !important;
+            font-size: 0.95rem;
             font-family: "Plus Jakarta Sans", Helvetica;
-            transition: all 0.3s ease;
+            font-weight: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 100%;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .filter-input option {
+            background: #1a1a2e !important;
+            color: white !important;
+            padding: 8px;
         }
 
         .filter-input:focus {
             outline: none;
-            border-color: rgba(102, 126, 234, 0.5);
-            background: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
+            border-color: rgba(102, 126, 234, 0.6);
+            background: rgba(255, 255, 255, 0.12) !important;
+            box-shadow: 0 0 25px rgba(102, 126, 234, 0.3), 0 4px 20px rgba(0, 0, 0, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .filter-input:hover {
+            border-color: rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.1) !important;
         }
 
         .filter-input::placeholder {
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 400;
         }
 
-        .filter-btn {
+        .clear-btn {
             padding: 12px 24px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
             color: white;
             border: none;
             border-radius: 12px;
@@ -347,12 +493,16 @@
             font-weight: 600;
             font-family: "Plus Jakarta Sans", Helvetica;
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 8px 25px rgba(255, 107, 107, 0.3);
             position: relative;
             overflow: hidden;
+            justify-self: center;
+            align-self: end;
+            white-space: nowrap;
+            min-width: fit-content;
         }
 
-        .filter-btn::before {
+        .clear-btn::before {
             content: '';
             position: absolute;
             top: 0;
@@ -363,12 +513,12 @@
             transition: left 0.6s ease;
         }
 
-        .filter-btn:hover {
+        .clear-btn:hover {
             transform: translateY(-2px) scale(1.05);
-            box-shadow: 0 12px 35px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 12px 35px rgba(255, 107, 107, 0.4);
         }
 
-        .filter-btn:hover::before {
+        .clear-btn:hover::before {
             left: 100%;
         }
 
@@ -377,7 +527,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 15px;
-            margin: 15px 20px;
+            margin: 2px 20px;
         }
 
         .stat-item {
@@ -436,7 +586,7 @@
             border-radius: 20px;
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
             padding: 30px;
-            margin: 15px 20px;
+            margin: 2px 20px;
             max-height: 60vh;
             overflow: hidden;
             display: flex;
@@ -613,6 +763,14 @@
             transform: translateX(5px) scale(1.01);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
         }
+        
+        .log-entry:nth-child(even) {
+            animation-delay: 0.1s;
+        }
+        
+        .log-entry:nth-child(3n) {
+            animation-delay: 0.2s;
+        }
 
         .log-entry:hover::before {
             left: 100%;
@@ -748,6 +906,36 @@
 
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+        
+        .log-entry {
+            animation: fadeInUp 0.4s ease-out;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .stats-card {
+            animation: slideInLeft 0.5s ease-out;
+        }
+        
+        @keyframes slideInLeft {
+            from {
+                opacity: 0;
+                transform: translateX(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
         }
 
         .loading-container {
@@ -1131,14 +1319,17 @@
         <!-- Filter Controls -->
         <div class="filter-controls glass">
             <div class="filter-group">
+                <div class="filter-indicator" id="dateFromIndicator"></div>
                 <label class="filter-label">Date From</label>
                 <input type="date" class="filter-input" id="dateFrom">
             </div>
             <div class="filter-group">
+                <div class="filter-indicator" id="dateToIndicator"></div>
                 <label class="filter-label">Date To</label>
                 <input type="date" class="filter-input" id="dateTo">
             </div>
             <div class="filter-group">
+                <div class="filter-indicator" id="eventTypeIndicator"></div>
                 <label class="filter-label">Event Type</label>
                 <select class="filter-input" id="eventType">
                     <option value="all">All Events</option>
@@ -1147,15 +1338,16 @@
                 </select>
             </div>
             <div class="filter-group">
+                <div class="filter-indicator" id="minConfidenceIndicator"></div>
                 <label class="filter-label">Min Confidence</label>
                 <input type="number" class="filter-input" id="minConfidence" min="0" max="100" placeholder="0-100">
             </div>
-            <button class="filter-btn" onclick="applyFilters()">
-                <i class="fas fa-filter"></i> Apply Filters
+            <button class="clear-btn" onclick="clearFilters()">
+                <i class="fas fa-times"></i> Clear Filters
             </button>
-            <button class="filter-btn" onclick="clearFilters()">
-                <i class="fas fa-times"></i> Clear
-            </button>
+            <div class="filter-status" id="filterStatus">
+                <i class="fas fa-filter"></i> Filters are active - showing filtered results
+            </div>
         </div>
 
         <!-- Stats Summary -->
@@ -1205,10 +1397,55 @@
         let allLogs = [];
         let filteredLogs = [];
 
+        // Show quota exceeded notification
+        function showQuotaNotification(quotaStatus) {
+            // Remove existing quota notification if any
+            const existingNotification = document.getElementById('quota-notification');
+            if (existingNotification) {
+                existingNotification.remove();
+            }
+            
+            const notification = document.createElement('div');
+            notification.id = 'quota-notification';
+            notification.className = 'alert alert-warning alert-dismissible fade show position-fixed';
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+            
+            let message = 'Using mock data. ';
+             if (quotaStatus.quota_exceeded) {
+                 message += 'Firebase quota exceeded. ';
+             } else if (!quotaStatus.firebase_initialized) {
+                 message += 'Firebase not initialized. ';
+             }
+             message += 'Real data will resume when Firebase is available.';
+             
+             notification.innerHTML = `
+                 <strong><i class="fas fa-exclamation-triangle"></i> Data Notice:</strong> ${message}
+                <button type="button" class="close" data-dismiss="alert" onclick="hideQuotaNotification()">
+                    <span>&times;</span>
+                </button>
+            `;
+            
+            document.body.appendChild(notification);
+        }
+        
+        // Hide quota notification
+        function hideQuotaNotification() {
+            const notification = document.getElementById('quota-notification');
+            if (notification) {
+                notification.remove();
+            }
+        }
+        
         // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
             loadLogs();
             setDefaultDates();
+            
+            // Add event listeners for filter inputs
+            document.getElementById('dateFrom').addEventListener('change', applyFilters);
+            document.getElementById('dateTo').addEventListener('change', applyFilters);
+            document.getElementById('eventType').addEventListener('change', applyFilters);
+            document.getElementById('minConfidence').addEventListener('input', applyFilters);
             
             // Auto-refresh logs every 10 seconds for real-time updates
             setInterval(() => {
@@ -1259,10 +1496,21 @@
                     }
                     
                     // Extract logs array from response object
-                    allLogs = data.logs || [];
-                    filteredLogs = [...allLogs];
-                    displayLogs();
-                    updateStats();
+                    const logs = data.logs || [];
+                    const quotaStatus = data.quota_status || {};
+                    
+                    // Check if using mock data due to quota exceeded
+                    if (quotaStatus.using_mock_data) {
+                        showQuotaNotification(quotaStatus);
+                    } else {
+                        hideQuotaNotification();
+                    }
+                    
+                    allLogs = logs;
+                    console.log('Loaded logs:', allLogs.length);
+                    
+                    // Apply current filters to new data
+                    applyFilters();
                     
                     // Update refresh indicator
                     if (refreshIndicator) {
@@ -1374,6 +1622,11 @@
             const eventType = document.getElementById('eventType').value;
             const minConfidence = parseFloat(document.getElementById('minConfidence').value) || 0;
             
+            console.log('Applying filters:', { dateFrom, dateTo, eventType, minConfidence });
+            
+            // Update filter indicators
+            updateFilterIndicators(dateFrom, dateTo, eventType, minConfidence);
+            
             filteredLogs = allLogs.filter(log => {
                 const logDate = new Date(log.timestamp).toISOString().split('T')[0];
                 
@@ -1392,6 +1645,7 @@
                 return true;
             });
             
+            console.log('Filtered logs count:', filteredLogs.length);
             displayLogs();
             updateStats();
         }
@@ -1402,10 +1656,37 @@
             document.getElementById('eventType').value = 'all';
             document.getElementById('minConfidence').value = '';
             
+            // Clear all filter indicators
+            updateFilterIndicators('', '', 'all', 0);
+            
             filteredLogs = [...allLogs];
             displayLogs();
             updateStats();
             setDefaultDates();
+        }
+        
+        function updateFilterIndicators(dateFrom, dateTo, eventType, minConfidence) {
+            const hasActiveFilters = dateFrom || dateTo || (eventType && eventType !== 'all') || minConfidence > 0;
+            
+            // Update individual indicators
+            document.getElementById('dateFromIndicator').classList.toggle('active', !!dateFrom);
+            document.getElementById('dateToIndicator').classList.toggle('active', !!dateTo);
+            document.getElementById('eventTypeIndicator').classList.toggle('active', eventType && eventType !== 'all');
+            document.getElementById('minConfidenceIndicator').classList.toggle('active', minConfidence > 0);
+            
+            // Update filter status
+            const filterStatus = document.getElementById('filterStatus');
+            filterStatus.classList.toggle('active', hasActiveFilters);
+            
+            if (hasActiveFilters) {
+                let activeFilters = [];
+                if (dateFrom) activeFilters.push('Date From');
+                if (dateTo) activeFilters.push('Date To');
+                if (eventType && eventType !== 'all') activeFilters.push('Event Type');
+                if (minConfidence > 0) activeFilters.push('Min Confidence');
+                
+                filterStatus.innerHTML = `<i class="fas fa-filter"></i> Active filters: ${activeFilters.join(', ')}`;
+            }
         }
 
         function exportLogs() {
