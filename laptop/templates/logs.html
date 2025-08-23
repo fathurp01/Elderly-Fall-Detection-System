@@ -1258,7 +1258,8 @@
                         return;
                     }
                     
-                    allLogs = data;
+                    // Extract logs array from response object
+                    allLogs = data.logs || [];
                     filteredLogs = [...allLogs];
                     displayLogs();
                     updateStats();

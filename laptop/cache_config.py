@@ -123,8 +123,23 @@ class CacheManager:
     
     def generate_key(self, prefix: str, **kwargs) -> str:
         """Generate cache key from parameters"""
-        # Create a hash from the parameters
-        params_str = json.dumps(kwargs, sort_keys=True)
+        # Filter out non-serializable objects and only use safe parameters
+        safe_params = {}
+        for key, value in kwargs.items():
+            try:
+                # Only include serializable values
+                if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+                    safe_params[key] = value
+                elif hasattr(value, '__name__'):  # Function names
+                    safe_params[key] = value.__name__
+                else:
+                    # Skip non-serializable objects like FirebaseHandler
+                    continue
+            except:
+                continue
+        
+        # Create a hash from the safe parameters
+        params_str = json.dumps(safe_params, sort_keys=True, default=str)
         params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
         return f"{prefix}:{params_hash}"
 
@@ -176,12 +191,15 @@ class RateLimitManager:
         
         return self.limiter.limit(rate_limit)
 
-def cached_firebase_query(cache_manager: CacheManager, timeout: int = 300, key_prefix: str = "firebase"):
-    """Decorator for caching Firebase queries"""
+def cached_firebase_query(timeout: int = 300, key_prefix: str = "firebase"):
+    """Decorator for caching Firebase queries with lazy cache manager evaluation"""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if not cache_manager.initialized:
+            # Get cache manager at runtime, not at import time
+            cache_manager = get_cache_manager()
+            
+            if not cache_manager or not cache_manager.initialized:
                 # If cache is not available, execute function directly
                 return func(*args, **kwargs)
             
@@ -197,8 +215,15 @@ def cached_firebase_query(cache_manager: CacheManager, timeout: int = 300, key_p
             # Execute function and cache result
             try:
                 result = func(*args, **kwargs)
-                cache_manager.set(cache_key, result, timeout=timeout)
-                logger.debug(f"Cache miss, stored result for key: {cache_key}")
+                
+                # Only cache serializable results
+                try:
+                    json.dumps(result, default=str)  # Test if result is serializable
+                    cache_manager.set(cache_key, result, timeout=timeout)
+                    logger.debug(f"Cache miss, stored result for key: {cache_key}")
+                except (TypeError, ValueError) as json_error:
+                    logger.warning(f"Result not cacheable for {func.__name__}: {json_error}")
+                
                 return result
             except Exception as e:
                 logger.error(f"Error in cached function {func.__name__}: {e}")

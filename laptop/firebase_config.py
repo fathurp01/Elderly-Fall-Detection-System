@@ -122,7 +122,7 @@ class FirebaseHandler:
             logging.error(f"Failed to get recent detections: {e}")
             return []
     
-    @cached_firebase_query(get_cache_manager() if CACHE_INTEGRATION and get_cache_manager() else None, timeout=300, key_prefix="recent_detections")
+    @cached_firebase_query(timeout=300, key_prefix="recent_detections")
     def get_recent_detections_optimized(self, limit: int = 10, hours: int = 24) -> List[Dict]:
         """Get recent fall detections with time filtering and caching"""
         if not self.initialized:
@@ -175,7 +175,7 @@ class FirebaseHandler:
             # Return mock data on error
             return self._get_mock_logs()
     
-    @cached_firebase_query(get_cache_manager() if CACHE_INTEGRATION and get_cache_manager() else None, timeout=600, key_prefix="all_logs")
+    @cached_firebase_query(timeout=600, key_prefix="all_logs")
     def get_all_logs_optimized(self, limit: int = 500, days: int = 30) -> List[Dict]:
         """Get detection logs with time filtering and optimized query"""
         try:

@@ -2406,8 +2406,11 @@
                         return;
                     }
                     
+                    // Extract logs array from response object
+                    const logs = data.logs || [];
+                    
                     // Update statistics from Firebase data
-                    const fallLogs = data.filter(log => log.type === 'fall' || log.is_fall === true);
+                    const fallLogs = logs.filter(log => log.type === 'fall' || log.is_fall === true);
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
                     
@@ -2444,8 +2447,8 @@
                     });
                     
                     // Add periodic status update
-                    addSystemLogEntry('monitoring', `Real-time sync: ${data.length} logs synchronized`);
-                    console.log('Firebase data updated:', data.length, 'logs loaded');
+                    addSystemLogEntry('monitoring', `Real-time sync: ${logs.length} logs synchronized`);
+                    console.log('Firebase data updated:', logs.length, 'logs loaded');
                 })
                 .catch(error => {
                     console.warn('Error loading Firebase data:', error);

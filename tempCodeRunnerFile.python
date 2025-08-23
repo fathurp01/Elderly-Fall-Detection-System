@@ -1,6 +1,0 @@
-import h5py
-
-# Check model file structure
-with h5py.File('laptop/best3.keras', 'r') as f:
-    print("Keys in model file:")
-    print(list(f.keys()))
