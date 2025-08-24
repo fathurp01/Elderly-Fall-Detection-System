@@ -1753,17 +1753,14 @@
 
                     <!-- Grid 3: Latest Detection Frame -->
                     <div class="div3 latest-detection-frame">
-                        <h3 class="latest-detection-title">Latest Detection Frame</h3>
+                        <h3 class="latest-detection-title">Latest Detection</h3>
                         <div class="detection-frame-container">
-                            <img id="recentFrameImage" class="recent-frame-image" style="display: none;" alt="Recent detection frame">
                             <div id="recentFramePlaceholder" class="recent-frame-placeholder">
-                                <i class="fas fa-image" style="font-size: 20px; margin-bottom: 8px;"></i><br>
-                                Waiting for fall detection...
+                                <div class="recent-frame-info">
+                                    <div id="lastDetectionTime">No recent detections</div>
+                                    <div id="detectionBadge" class="fall-detection-badge" style="display: none;">Fall Detected</div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="recent-frame-info">
-                            <div id="lastDetectionTime">No recent detections</div>
-                            <div id="detectionBadge" class="fall-detection-badge" style="display: none;">Fall Detected</div>
                         </div>
                     </div>
                     

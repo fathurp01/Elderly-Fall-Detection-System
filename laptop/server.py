@@ -943,7 +943,7 @@ def main():
     
     # Configuration from environment variables with command line overrides
     SEQUENCE_LENGTH = 41  # Match LSTM training configuration
-    CONFIDENCE_THRESHOLD = 0.7
+    CONFIDENCE_THRESHOLD = 0.95  # Very high threshold to minimize false positives
     FALL_COOLDOWN_SECONDS = args.cooldown if args.cooldown != 10 else int(os.getenv('FALL_COOLDOWN_SECONDS', '10'))
     NORMAL_SAMPLE_RATE = args.normal_sample_rate if args.normal_sample_rate != 0.1 else float(os.getenv('NORMAL_ACTIVITY_SAMPLE_RATE', '0.1'))
     HOST = args.host if args.host != '0.0.0.0' else os.getenv('SERVER_HOST', '0.0.0.0')

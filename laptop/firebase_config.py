@@ -328,7 +328,7 @@ class FirebaseHandler:
             
             # Generate random confidence and type
             confidence = random.uniform(0.1, 0.95)
-            is_fall = confidence > 0.7 or random.random() < 0.3  # 30% chance of fall for better demo
+            is_fall = confidence > 0.95 or random.random() < 0.3  # 30% chance of fall for better demo
             
             mock_logs.append({
                 'id': f'mock_{i}',

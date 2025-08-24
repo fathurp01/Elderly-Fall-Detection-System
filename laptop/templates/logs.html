@@ -1660,7 +1660,7 @@
                     const logDate = new Date(log.timestamp);
                     if (logDate >= last24Hours) {
                         // Only show fall detected notifications
-                        const isFall = log.type === 'fall' || log.confidence > 0.7;
+                        const isFall = log.type === 'fall' || log.confidence > 0.95;
                         if (isFall) {
                             notifications.push({
                                 id: log.id || Date.now() + Math.random(),
@@ -1737,7 +1737,7 @@
                 // Count recent falls from allLogs
                 const recentFalls = allLogs.filter(log => {
                     const logDate = new Date(log.timestamp);
-                    const isFall = log.type === 'fall' || log.confidence > 0.7;
+                    const isFall = log.type === 'fall' || log.confidence > 0.95;
                     return logDate >= last24Hours && isFall;
                 });
 
@@ -1919,7 +1919,7 @@
             // Limit to maximum 20 items for display
             const displayLogs = filteredLogs.slice(0, 20);
             const logsHtml = displayLogs.map(log => {
-                const isFall = log.type === 'fall' || log.confidence > 0.7;
+                const isFall = log.type === 'fall' || log.confidence > 0.95;
                 const confidence = Math.round(log.confidence * 100);
                 const confidenceClass = confidence > 80 ? 'confidence-high' : 
                                       confidence > 50 ? 'confidence-medium' : 'confidence-low';
@@ -2006,7 +2006,7 @@
                 if (dateTo && logDate > dateTo) return false;
                 
                 // Event type filter
-                const isFall = log.type === 'fall' || log.confidence > 0.7;
+                const isFall = log.type === 'fall' || log.confidence > 0.95;
                 if (eventType === 'fall' && !isFall) return false;
                 if (eventType === 'normal' && isFall) return false;
                 
@@ -2069,7 +2069,7 @@
             const csvContent = [
                 ['Timestamp', 'Type', 'Confidence', 'Details'].join(','),
                 ...filteredLogs.map(log => {
-                    const isFall = log.type === 'fall' || log.confidence > 0.7;
+                    const isFall = log.type === 'fall' || log.confidence > 0.95;
                     return [
                         new Date(log.timestamp).toISOString(),
                         isFall ? 'Fall' : 'Normal',

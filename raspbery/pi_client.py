@@ -47,7 +47,7 @@ class PiClient:
             sequence_mode: If True, send sequences of bounding boxes. If False, send per frame
             sequence_length: Number of frames in a sequence
         """
-        self.server_url = server_url or os.getenv('SERVER_URL', 'http://10.243.149.68:5001/')
+        self.server_url = server_url or os.getenv('SERVER_URL', 'http://10.42.117.102:5001')
         self.sequence_mode = sequence_mode
         self.sequence_length = sequence_length
         
@@ -186,7 +186,7 @@ class PiClient:
                 logger.info("PiCamera2 not available, trying USB camera")
             
             # Fallback to USB camera
-            self.cap = cv2.VideoCapture(0)
+            self.cap = cv2.VideoCapture(1)
             if not self.cap.isOpened():
                 raise Exception("Cannot open USB camera")
                 
@@ -992,7 +992,7 @@ class PiClient:
 
 def main():
     # Configuration from environment variables
-    SERVER_URL = os.getenv('SERVER_URL', 'http://10.243.149.68:5001/')
+    SERVER_URL = os.getenv('SERVER_URL', 'http://10.42.117.102:5001')
     SEQUENCE_MODE = os.getenv('SEQUENCE_MODE', 'True').lower() == 'true'
     SEQUENCE_LENGTH = int(os.getenv('SEQUENCE_LENGTH', '61'))
     
