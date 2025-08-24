@@ -1652,7 +1652,7 @@
                      <img src="/static/images/logs.png" alt="Logs" width="24" height="24">
                  </div>
              </a>
-             <a href="tel:0000000" class="nav-item emergency-btn" onclick="handleEmergencyCall()">
+             <a href="tel:+6282127047395" class="nav-item emergency-btn" onclick="handleEmergencyCall()">
                  <div class="nav-icon">
                      <img src="/static/images/emergency.png" alt="Emergency" width="24" height="24">
                  </div>
@@ -3087,16 +3087,17 @@
         // Emergency Call Handler
         function handleEmergencyCall() {
             // Show confirmation dialog
-            const confirmed = confirm('🚨 EMERGENCY CALL\n\nAre you sure you want to contact emergency services?\n\nNumber to be called: 0000000 (Testing)');
+            const confirmed = confirm('🚨 EMERGENCY CALL\n\nAre you sure you want to contact emergency services?\n\nNumber to be called: +6282127047395
++6282127047395 (Testing)');
             
             if (confirmed) {
                 // Log emergency call attempt
-                console.log('Emergency call initiated to: 0000000');
+                console.log('Emergency call initiated to: +6282127047395');
                 
                 // Show notification
                 if ('Notification' in window && Notification.permission === 'granted') {
                     new Notification('🚨 Emergency Call', {
-                        body: 'Contacting emergency services: 0000000',
+                        body: 'Contacting emergency services: +6282127047395',
                         icon: '/static/images/emergency.png',
                         requireInteraction: true
                     });

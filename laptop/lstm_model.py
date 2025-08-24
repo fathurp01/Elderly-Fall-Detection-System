@@ -66,7 +66,7 @@ class LSTMModel:
         
         # Training parameters (sesuai dengan untitled15 (2).py)
         self.TARGET_FPS = 30
-        self.TARGET_SEQUENCE_LENGTH = 41  # Sesuai dengan training
+        self.TARGET_SEQUENCE_LENGTH = 61  # Sesuai dengan training
         self.BATCH_SIZE = 32
         self.NUM_FEATURES = 13  # Sesuai dengan training: 13 features
         self.LOCF_MAX_FRAMES = 5
