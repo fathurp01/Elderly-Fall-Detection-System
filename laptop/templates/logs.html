@@ -977,7 +977,28 @@
             }
 
             .nav-sidebar {
-                display: none;
+                position: static;
+                width: 100%;
+                height: auto;
+                flex-direction: row;
+                justify-content: center;
+                margin-bottom: 20px;
+                gap: 15px;
+            }
+
+            .nav-item {
+                width: 60px;
+                height: 60px;
+            }
+
+            .nav-item.emergency-btn {
+                width: 60px;
+                height: 60px;
+                border-width: 2px;
+            }
+
+            .nav-item.emergency-btn:hover {
+                transform: translateY(-1px) scale(1.05);
             }
 
             .header {
@@ -1181,6 +1202,31 @@
             font-size: 14px;
         }
 
+        .notification-loading {
+            padding: 20px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         /* Navigation Sidebar */
         .nav-sidebar {
             position: absolute;
@@ -1257,6 +1303,66 @@
             color: #ffffff;
         }
 
+        /* Emergency Button Styling */
+        .nav-item.emergency-btn {
+            background: rgba(255, 68, 68, 0.15) !important;
+            border: 1px solid rgba(255, 68, 68, 0.3);
+            animation: pulse-emergency 2s infinite;
+        }
+
+        .nav-item.emergency-btn:hover {
+            background: rgba(255, 68, 68, 0.25) !important;
+            transform: translateY(-2px) scale(1.08);
+            box-shadow: 0 15px 35px rgba(255, 68, 68, 0.4);
+        }
+
+        .nav-item.emergency-btn .nav-icon {
+            color: #ff4444 !important;
+        }
+
+        @keyframes pulse-emergency {
+            0% {
+                box-shadow: 0 4px 15px rgba(255, 68, 68, 0.2);
+            }
+            50% {
+            box-shadow: 0 8px 25px rgba(255, 68, 68, 0.4);
+            }
+            100% {
+                box-shadow: 0 4px 15px rgba(255, 68, 68, 0.2);
+            }
+        }
+        
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.6s ease;
+        }
+        
+        .nav-item:hover::before {
+            left: 100%;
+        }
+
+        .nav-icon {
+            font-family: "Inter", Helvetica;
+            font-weight: 400;
+            font-size: 12px;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        .nav-item.active .nav-icon {
+            color: #000000;
+        }
+
+        .nav-item:not(.active) .nav-icon {
+            color: #ffffff;
+        }
+
         /* Scrollbar Styling */
         ::-webkit-scrollbar {
             width: 8px;
@@ -1289,13 +1395,18 @@
             <h1 class="main-title">Detection Logs</h1>
             <p class="subtitle">Comprehensive Fall Detection History & Analytics</p>
         </div>
-        <div class="notification-icon" onclick="toggleNotifications()">
+        <div class="notification-icon" id="notificationIcon">
             <i class="fas fa-bell"></i>
-            <div class="notification-badge" id="notificationBadge"></div>
+            <div class="notification-badge" id="notificationBadge">0</div>
             <div class="notification-dropdown" id="notificationDropdown">
-                <div class="notification-header">Recent Alerts</div>
+                <div class="notification-header">
+                    <i class="fas fa-bell"></i> Notifications
+                </div>
                 <div class="notification-list" id="notificationList">
-                    <div class="notification-empty">No new notifications</div>
+                    <div class="notification-loading" id="notificationLoading">
+                        <div class="spinner"></div>
+                        <span>Updating notifications...</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1311,6 +1422,11 @@
         <a href="/logs" class="nav-item active">
             <div class="nav-icon">
                 <img src="/static/images/logs.png" alt="Logs" width="24" height="24">
+            </div>
+        </a>
+        <a href="tel:0000000" class="nav-item emergency-btn" onclick="handleEmergencyCall()">
+            <div class="nav-icon">
+                <img src="/static/images/emergency.png" alt="Emergency" width="24" height="24">
             </div>
         </a>
     </div>
@@ -1454,21 +1570,276 @@
             }, 10000);
         });
 
-        // Notification functions
-        function toggleNotifications() {
-            const dropdown = document.getElementById('notificationDropdown');
-            dropdown.classList.toggle('show');
+        // Notification System
+        let notifications = [];
+        let notificationCount = 0;
+
+        function initializeNotificationSystem() {
+            const notificationIcon = document.querySelector('.notification-icon');
+            const notificationDropdown = document.getElementById('notificationDropdown');
+
+            if (!notificationIcon || !notificationDropdown) {
+                console.warn('Notification elements not found');
+                return;
+            }
+
+            // Add click event listener to notification icon
+            notificationIcon.addEventListener('click', function(e) {
+                e.stopPropagation();
+                console.log('Notification icon clicked');
+
+                // Load notifications when dropdown is about to be opened
+                if (!notificationDropdown.classList.contains('show')) {
+                    loadNotificationHistory();
+                }
+
+                toggleNotificationDropdown();
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!notificationIcon.contains(e.target)) {
+                    closeNotificationDropdown();
+                }
+            });
+
+            // Load initial notification count
+            loadNotificationCount();
+
+            // Auto-refresh notification badge and history every 10 seconds for realtime updates
+            setInterval(() => {
+                loadNotificationCount();
+                
+                if (notificationDropdown.classList.contains('show')) {
+                    loadNotificationHistory();
+                }
+            }, 10000);
+
+            console.log('Notification system initialized');
         }
 
-        // Close notification dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const notificationIcon = document.querySelector('.notification-icon');
+        function toggleNotificationDropdown() {
             const dropdown = document.getElementById('notificationDropdown');
-            
-            if (!notificationIcon.contains(event.target)) {
+            if (dropdown) {
+                dropdown.classList.toggle('show');
+                console.log('Notification dropdown toggled, show class:', dropdown.classList.contains('show'));
+            } else {
+                console.error('Notification dropdown element not found');
+            }
+        }
+
+        function closeNotificationDropdown() {
+            const dropdown = document.getElementById('notificationDropdown');
+            if (dropdown) {
                 dropdown.classList.remove('show');
             }
-        });
+        }
+
+        function loadNotificationHistory() {
+            const notificationList = document.getElementById('notificationList');
+            const loadingElement = document.getElementById('notificationLoading');
+
+            if (!notificationList) return;
+
+            // Show loading state
+            notificationList.innerHTML = `
+                <div class="notification-loading">
+                    <div class="spinner"></div>
+                    <span>Updating notifications...</span>
+                </div>
+            `;
+
+            try {
+                // Get recent logs from allLogs array
+                const notifications = [];
+                const now = new Date();
+                const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+                // Filter logs from last 24 hours
+                allLogs.forEach(log => {
+                    const logDate = new Date(log.timestamp);
+                    if (logDate >= last24Hours) {
+                        // Only show fall detected notifications
+                        const isFall = log.type === 'fall' || log.confidence > 0.7;
+                        if (isFall) {
+                            notifications.push({
+                                id: log.id || Date.now() + Math.random(),
+                                type: 'fall-alert',
+                                message: `Fall detected with ${Math.round(log.confidence * 100)}% confidence`,
+                                details: `Detected at ${new Date(log.timestamp).toLocaleString()}`,
+                                timestamp: new Date(log.timestamp),
+                                read: false
+                            });
+                        }
+                    }
+                });
+
+                displayNotifications(notifications);
+                const unreadCount = notifications.filter(n => !n.read).length;
+                updateNotificationBadge(unreadCount);
+            } catch (error) {
+                console.error('Error loading notifications:', error);
+                displayNotifications([]);
+            }
+        }
+
+        function displayNotifications(notifications) {
+            const notificationList = document.getElementById('notificationList');
+            if (!notificationList) return;
+
+            if (notifications.length === 0) {
+                notificationList.innerHTML = '<div class="notification-empty">No notifications</div>';
+                return;
+            }
+
+            const notificationHTML = notifications.map(notification => {
+                const timeAgo = getTimeAgo(notification.timestamp);
+                return `
+                    <div class="notification-item ${notification.type}" data-id="${notification.id}">
+                        <div class="notification-time">${timeAgo}</div>
+                        <div class="notification-message">${notification.message}</div>
+                        <div class="notification-details">${notification.details}</div>
+                    </div>
+                `;
+            }).join('');
+
+            notificationList.innerHTML = notificationHTML;
+
+            // Add click handlers for notification items
+            notificationList.querySelectorAll('.notification-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    const notificationId = this.dataset.id;
+                    markNotificationAsRead(notificationId);
+                });
+            });
+        }
+
+        function getTimeAgo(timestamp) {
+            const now = new Date();
+            const diffInSeconds = Math.floor((now - timestamp) / 1000);
+            
+            if (diffInSeconds < 60) return 'Just now';
+            if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+            if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+            return `${Math.floor(diffInSeconds / 86400)} days ago`;
+        }
+
+        function markNotificationAsRead(notificationId) {
+            // Mark notification as read (could update Firebase here)
+            console.log('Marking notification as read:', notificationId);
+        }
+
+        function loadNotificationCount() {
+            try {
+                const now = new Date();
+                const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                
+                // Count recent falls from allLogs
+                const recentFalls = allLogs.filter(log => {
+                    const logDate = new Date(log.timestamp);
+                    const isFall = log.type === 'fall' || log.confidence > 0.7;
+                    return logDate >= last24Hours && isFall;
+                });
+
+                updateNotificationBadge(recentFalls.length);
+            } catch (error) {
+                console.error('Error loading notification count:', error);
+                updateNotificationBadge(0);
+            }
+        }
+
+        function updateNotificationBadge(count) {
+            const badge = document.getElementById('notificationBadge');
+            if (badge) {
+                badge.textContent = count;
+                badge.style.display = count > 0 ? 'block' : 'none';
+                if (count > 0) {
+                    badge.classList.add('show');
+                } else {
+                    badge.classList.remove('show');
+                }
+            }
+        }
+
+        function addNotification(type, message, timestamp = new Date()) {
+            const notification = {
+                id: Date.now() + Math.random(),
+                type: type,
+                message: message,
+                timestamp: timestamp,
+                read: false
+            };
+
+            notifications.unshift(notification);
+
+            // Keep only last 10 notifications
+            if (notifications.length > 10) {
+                notifications = notifications.slice(0, 10);
+            }
+
+            updateNotificationList();
+            updateNotificationBadge();
+
+            // Show browser notification if permission granted
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('Fall Detection Alert', {
+                    body: message,
+                    icon: '/static/images/emergency.png'
+                });
+            }
+
+            // Auto-refresh notification history if dropdown is open
+            const dropdown = document.getElementById('notificationDropdown');
+            if (dropdown && dropdown.classList.contains('show')) {
+                loadNotificationHistory();
+            }
+        }
+
+        function updateNotificationList() {
+            const notificationList = document.getElementById('notificationList');
+            if (!notificationList) return;
+
+            if (notifications.length === 0) {
+                notificationList.innerHTML = '<div class="notification-empty">No notifications</div>';
+                return;
+            }
+
+            notificationList.innerHTML = '';
+
+            notifications.forEach(notification => {
+                const notificationItem = document.createElement('div');
+                notificationItem.className = `notification-item ${notification.type === 'fall' ? 'fall-alert' : ''}`;
+
+                const timeString = notification.timestamp.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                const dateString = notification.timestamp.toLocaleDateString('en-US');
+
+                notificationItem.innerHTML = `
+                    <div class="notification-time">${dateString} ${timeString}</div>
+                    <div class="notification-message">
+                        ${notification.type === 'fall' ? '<i class="fas fa-exclamation-triangle"></i>' : '<i class="fas fa-info-circle"></i>'}
+                        ${notification.message}
+                    </div>
+                `;
+
+                notificationItem.addEventListener('click', function() {
+                    markNotificationAsRead(notification.id);
+                });
+
+                notificationList.appendChild(notificationItem);
+            });
+        }
+
+        function markNotificationAsRead(notificationId) {
+            const notification = notifications.find(n => n.id === notificationId);
+            if (notification && !notification.read) {
+                notification.read = true;
+                updateNotificationBadge();
+            }
+        }
 
         function setDefaultDates() {
             const today = new Date();
@@ -1741,6 +2112,43 @@
                 </div>
             `;
         }
+
+        function handleEmergencyCall() {
+            // Show confirmation dialog
+            const confirmed = confirm('🚨 EMERGENCY CALL\n\nAre you sure you want to contact emergency services?\n\nNumber to be called: 0000000 (Testing)');
+            
+            if (confirmed) {
+                // Log emergency call attempt
+                console.log('Emergency call initiated to: 0000000');
+                
+                // Show notification
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('🚨 Emergency Call', {
+                        body: 'Contacting emergency services: 0000000',
+                        icon: '/static/images/emergency.png',
+                        requireInteraction: true
+                    });
+                }
+                
+                // For testing purposes, show alert instead of actual call
+                setTimeout(() => {
+                    alert('📞 TESTING MODE\n\nEmergency call to 0000000 successfully initiated.\n\nIn production mode, this will directly call the ambulance number.');
+                }, 500);
+            }
+            
+            // Prevent default link behavior
+            return false;
+        }
+
+        // Initialize notification system when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeNotificationSystem();
+        });
+
+        // Expose functions globally
+        window.handleEmergencyCall = handleEmergencyCall;
+        window.addNotification = addNotification;
+        window.loadNotificationHistory = loadNotificationHistory;
     </script>
 </body>
 </html>

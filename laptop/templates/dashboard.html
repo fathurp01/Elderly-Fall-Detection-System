@@ -547,6 +547,35 @@
             color: #ffffff;
         }
 
+        /* Emergency Button Styling */
+        .nav-item.emergency-btn {
+            background: rgba(255, 68, 68, 0.15) !important;
+            border: 1px solid rgba(255, 68, 68, 0.3);
+            animation: pulse-emergency 2s infinite;
+        }
+
+        .nav-item.emergency-btn:hover {
+            background: rgba(255, 68, 68, 0.25) !important;
+            transform: translateY(-2px) scale(1.08);
+            box-shadow: 0 15px 35px rgba(255, 68, 68, 0.4);
+        }
+
+        .nav-item.emergency-btn .nav-icon {
+            color: #ff4444 !important;
+        }
+
+        @keyframes pulse-emergency {
+            0% {
+                box-shadow: 0 4px 15px rgba(255, 68, 68, 0.2);
+            }
+            50% {
+            box-shadow: 0 8px 25px rgba(255, 68, 68, 0.4);
+            }
+            100% {
+                box-shadow: 0 4px 15px rgba(255, 68, 68, 0.2);
+            }
+        }
+
         /* Main Content Area */
         .main-content {
             margin-left: 90px;
@@ -1194,6 +1223,18 @@
             font-weight: 600;
         }
 
+        .log-entry.fall-alert .log-message {
+            color: #ff4757;
+            font-weight: 600;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
 
 
         .stat-card {
@@ -1477,6 +1518,16 @@
                 height: 60px;
             }
 
+            .nav-item.emergency-btn {
+                width: 60px;
+                height: 60px;
+                border-width: 2px;
+            }
+
+            .nav-item.emergency-btn:hover {
+                transform: translateY(-1px) scale(1.05);
+            }
+
             .system-check-title,
             .recent-detection-title {
                 font-size: 28px;
@@ -1599,6 +1650,11 @@
              <a href="/logs" class="nav-item">
                  <div class="nav-icon">
                      <img src="/static/images/logs.png" alt="Logs" width="24" height="24">
+                 </div>
+             </a>
+             <a href="tel:0000000" class="nav-item emergency-btn" onclick="handleEmergencyCall()">
+                 <div class="nav-icon">
+                     <img src="/static/images/emergency.png" alt="Emergency" width="24" height="24">
                  </div>
              </a>
          </div>
@@ -1902,6 +1958,17 @@
                 updateSystemHealth('firebaseStatus', data.database_connected);
             });
             
+            socket.on('fall_alert', function(data) {
+                console.log('Fall alert received:', data);
+                // Add to system log
+                addSystemLogEntry('fall-alert', `Fall alert triggered with ${(data.confidence * 100).toFixed(1)}% confidence`);
+                // Add notification
+                const timestamp = new Date(data.timestamp);
+                addNotification('fall', `Fall alert: Emergency detected with ${(data.confidence * 100).toFixed(1)}% confidence`, timestamp);
+                // Show fall alert popup
+                showFallAlert(timestamp);
+            });
+            
             socket.on('stats_update', function(data) {
                 console.log('Stats update received:', data);
                 // Update filtering statistics
@@ -1978,7 +2045,7 @@
         }
 
         function handleDetectionResult(data) {
-            const isFall = data.label === 'Jatuh' || data.label === 'Fall';
+            const isFall = data.label === 'Fall';
             
             if (isFall) {
                 // Update fall statistics
@@ -2034,7 +2101,7 @@
             
             if (detectionBadge) {
                 // Check if this is a fall detection
-                const isFall = data.is_fall === true || data.label === 'Jatuh' || data.prediction === 'Fall Detected';
+                const isFall = data.is_fall === true || data.label === 'Fall' || data.prediction === 'Fall Detected';
                 
                 if (isFall) {
                     const confidence = data.confidence ? (data.confidence * 100).toFixed(1) : '0.0';
@@ -2285,7 +2352,7 @@
                         const timestamp = data.timestamp ? data.timestamp.toDate() : new Date();
                         
                         // Only show fall detected notifications
-                        if (data.is_fall === true || data.label === 'Jatuh' || data.prediction === 'Fall Detected') {
+                        if (data.is_fall === true || data.label === 'Fall' || data.prediction === 'Fall Detected') {
                             notifications.push({
                                 id: doc.id,
                                 type: 'fall-alert',
@@ -2407,7 +2474,7 @@
                         }
                         const hoursSinceDetection = (new Date() - timestamp) / (1000 * 60 * 60);
                         // Only count fall detected notifications from last 24 hours
-                        return (data.is_fall === true || data.label === 'Jatuh' || data.prediction === 'Fall Detected') && hoursSinceDetection <= 24;
+                        return (data.is_fall === true || data.label === 'Fall' || data.prediction === 'Fall Detected') && hoursSinceDetection <= 24;
                     });
                     
                     updateNotificationBadge(recentFalls.length);
@@ -2469,7 +2536,7 @@
             if (!notificationList) return;
             
             if (notifications.length === 0) {
-                notificationList.innerHTML = '<div class="notification-empty">Tidak ada notifikasi</div>';
+                notificationList.innerHTML = '<div class="notification-empty">No notifications</div>';
                 return;
             }
             
@@ -2525,7 +2592,7 @@
                 second: '2-digit'
             });
             
-            timeElement.textContent = `Waktu: ${timeString}`;
+            timeElement.textContent = `Time: ${timeString}`;
             popup.classList.add('show');
             
             // Auto close after 10 seconds
@@ -2586,11 +2653,11 @@
         
         // Test functions for development
         function testNotification() {
-            addNotification('fall', 'Test: Terdeteksi aktivitas jatuh dengan tingkat kepercayaan 95.2%');
+            addNotification('fall', 'Test: Fall activity detected with 95.2% confidence level');
         }
         
         function testNormalNotification() {
-            addNotification('info', 'Test: Sistem berjalan normal');
+            addNotification('info', 'Test: System running normally');
         }
         
         // Firebase Data Loading Function
@@ -3020,12 +3087,56 @@
             });
         }
 
+        // Emergency Call Handler
+        function handleEmergencyCall() {
+            // Show confirmation dialog
+            const confirmed = confirm('🚨 EMERGENCY CALL\n\nAre you sure you want to contact emergency services?\n\nNumber to be called: 0000000 (Testing)');
+            
+            if (confirmed) {
+                // Log emergency call attempt
+                console.log('Emergency call initiated to: 0000000');
+                
+                // Show notification
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('🚨 Emergency Call', {
+                        body: 'Contacting emergency services: 0000000',
+                        icon: '/static/images/emergency.png',
+                        requireInteraction: true
+                    });
+                }
+                
+                // For testing purposes, show alert instead of actual call
+                setTimeout(() => {
+                    alert('📞 TESTING MODE\n\nEmergency call to 0000000 successfully initiated.\n\nIn production mode, this will directly call the ambulance number.');
+                }, 500);
+                
+                // Log to Firebase if available
+                if (firebaseInitialized && db) {
+                    try {
+                        db.collection('emergency_calls').add({
+                            timestamp: new Date().toISOString(),
+                            number: '0000000',
+                            type: 'emergency_call',
+                            status: 'initiated',
+                            session_id: 'dashboard_' + Date.now()
+                        });
+                    } catch (error) {
+                        console.error('Failed to log emergency call:', error);
+                    }
+                }
+            }
+            
+            // Prevent default link behavior
+            return false;
+        }
+
         // Expose test functions globally for console testing
         window.testNotification = testNotification;
         window.testNormalNotification = testNormalNotification;
         window.loadFirebaseData = loadFirebaseData;
+        window.handleEmergencyCall = handleEmergencyCall;
         
-        console.log('Script loading complete. Functions available: testNotification(), testNormalNotification(), loadFirebaseData()');
+        console.log('Script loading complete. Functions available: testNotification(), testNormalNotification(), loadFirebaseData(), handleEmergencyCall()');
     </script>
 </body>
 </html>

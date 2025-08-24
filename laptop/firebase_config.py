@@ -80,10 +80,10 @@ class FirebaseHandler:
     def _check_firebase_quota(self) -> bool:
         """Check if Firebase quota is available by performing a minimal query"""
         try:
-            # Only check quota every 5 minutes to avoid excessive calls
+            # Only check quota every 2 minutes to avoid excessive calls
             now = datetime.now()
             if (self.last_quota_check and 
-                (now - self.last_quota_check).total_seconds() < 300):
+                (now - self.last_quota_check).total_seconds() < 120):
                 return not self.quota_exceeded
             
             if not self.db:

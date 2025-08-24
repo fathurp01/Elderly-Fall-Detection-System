@@ -717,7 +717,7 @@ class FallDetectionServer:
             'message': f"FALL DETECTED! Confidence: {event_data['confidence']:.2f}"
         }
         
-        # Save to Firebase
+        # Save to Firebase immediately (no delay)
         try:
             # Flatten bbox_sequence to avoid nested arrays
             bbox_sequence_flat = []
@@ -744,10 +744,17 @@ class FallDetectionServer:
         except Exception as firebase_error:
             logger.error(f"Failed to save to Firebase: {firebase_error}")
         
-        # Broadcast fall alert to all connected clients
-        self.socketio.emit('fall_alert', alert_data)
+        # Delay alert broadcast by 2 seconds to reduce false positive alerts
+        def delayed_alert():
+            self.socketio.emit('fall_alert', alert_data)
+            logger.warning(f"FALL ALERT SENT! Confidence: {event_data['confidence']:.2f}")
         
-        logger.warning(f"FALL DETECTED! Confidence: {event_data['confidence']:.2f}")
+        # Schedule delayed alert
+        import threading
+        alert_timer = threading.Timer(2.0, delayed_alert)
+        alert_timer.start()
+        
+        logger.info(f"FALL DETECTED! Confidence: {event_data['confidence']:.2f} - Alert delayed 2s")
         
         # Optional: Send notification (implement as needed)
         # self.send_notification(alert_data)
